@@ -116,6 +116,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     
     private var ngWeight = 1.0f
     private var isDecoderDebugEnabled = false
+    private var isJiixDebugEnabled = false
     private var decoderMode = MyScriptService.DecoderMode.LLM
     private var llmTimeoutMs = 1000L
     private var llmModelIndex = 0
@@ -309,7 +310,12 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             
             override fun onJiixReceived(items: List<Item>) {
                 activity?.runOnUiThread {
+                    // Always update the ink preview strip
                     fragmentCameraBinding.inkPreview.setStrokes(items)
+                    // Show JIIX debug popup when enabled
+                    if (isJiixDebugEnabled) {
+                        fragmentCameraBinding.jiixDebugView.showStrokes(items)
+                    }
                 }
             }
         })
@@ -1045,6 +1051,17 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             myScriptService?.setDebugMode(isChecked)
             if (!isChecked) {
                 fragmentCameraBinding.textNgramDebug.visibility = View.GONE
+            }
+        }
+
+        bottomSheetBinding!!.jiixDebugSwitch.isChecked = isJiixDebugEnabled
+        bottomSheetBinding!!.jiixDebugSwitch.setOnCheckedChangeListener { _, isChecked ->
+            isJiixDebugEnabled = isChecked
+            fragmentCameraBinding.jiixDebugView.isJiixDebugEnabled = isChecked
+            if (isChecked) {
+                fragmentCameraBinding.jiixDebugView.showStrokes(emptyList())
+            } else {
+                fragmentCameraBinding.jiixDebugView.dismiss()
             }
         }
 

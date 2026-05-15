@@ -69,6 +69,24 @@
         android:layout_height="0dp"
         app:layout_constraintTop_toTopOf="@id/view_finder"
         app:layout_constraintBottom_toBottomOf="@id/view_finder"/>
+
+    <!-- JIIX Debug Overlay: reconstructs exactly what MyScript received.
+         Shown only when jiix_debug_mode is toggled in Settings.
+         Occupies the top half of the viewport. Tap to dismiss. -->
+    <com.google.mediapipe.examples.handlandmarker.JiixDebugView
+        android:id="@+id/jiix_debug_view"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        android:elevation="10dp"
+        app:layout_constraintTop_toTopOf="@id/view_finder"
+        app:layout_constraintBottom_toBottomOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintVertical_bias="0.0"
+        app:layout_constraintHeight_percent="0.5" />
+
+
         
     <!-- Ink Visualization Area -->
     <androidx.cardview.widget.CardView

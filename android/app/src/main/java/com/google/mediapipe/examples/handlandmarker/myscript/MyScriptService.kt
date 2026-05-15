@@ -4,6 +4,10 @@ import android.content.Context
 import android.util.DisplayMetrics
 import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.google.gson.JsonArray
+import com.google.gson.JsonParser
 import com.google.gson.annotations.SerializedName
 import com.google.mediapipe.examples.handlandmarker.MyScriptApplication
 import com.myscript.iink.ContentPart
@@ -31,6 +35,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 data class RecognitionRoot(
     val type: String?,
     val elements: List<Element>?,
+    val items: List<Item>?,
     val version: String?
 )
 
@@ -41,7 +46,11 @@ data class Element(
     val boundingBox: BoundingBox?,
     val words: List<Word>?,
     val items: List<Item>?, 
-    val label: String?
+    val label: String?,
+    @SerializedName(value = "X", alternate = ["x"])
+    val X: List<Float>?,
+    @SerializedName(value = "Y", alternate = ["y"])
+    val Y: List<Float>?
 )
 
 data class Word(
@@ -55,9 +64,9 @@ data class Word(
 data class Item(
     val type: String,
     val id: String?,
-    @SerializedName("X")
+    @SerializedName(value = "X", alternate = ["x"])
     val X: List<Float>?,
-    @SerializedName("Y")
+    @SerializedName(value = "Y", alternate = ["y"])
     val Y: List<Float>?
 )
 
@@ -218,6 +227,7 @@ class MyScriptService(private val context: Context, private val listener: Recogn
                             try {
                                 offscreenEditor?.configuration?.inject(partConf)
                                 offscreenEditor?.configuration?.setBoolean("export.jiix.text.words", true)
+                                offscreenEditor?.configuration?.setBoolean("export.jiix.strokes", true)
                                 if (enableEditorLogging) Log.d("Editor Logging", "Configuration injected")
                             } catch (e: Exception) {
                                 Log.e("Editor Logging", "Failed to inject configuration", e)
@@ -355,7 +365,7 @@ class MyScriptService(private val context: Context, private val listener: Recogn
                 
                 if (jiixString != null) {
                     if (enableEditorLogging) {
-                        Log.d("Editor Logging", "JIIX Export: ${jiixString.take(100)}...")
+                        Log.d("Editor Logging", "JIIX Export: ${jiixString.take(2000)}...")
                     }
                     val root = Gson().fromJson(jiixString, RecognitionRoot::class.java)
                     val allItems = mutableListOf<Item>()
@@ -385,9 +395,16 @@ class MyScriptService(private val context: Context, private val listener: Recogn
                             textSequence.add(listOf(element.label))
                             fallbackText.append(element.label).append(" ")
                         }
-                        
-                        // Collect Strokes inside Elements (Raw Content structure)
-                        element.items?.let { allItems.addAll(it) }
+                    }
+                    
+                    // NEW: Use robust recursive parsing to find ALL strokes in the JIIX payload,
+                    // regardless of whether they are under 'words', 'elements', or at the root.
+                    try {
+                        val rootElement = JsonParser.parseString(jiixString)
+                        extractStrokesRecursive(rootElement, allItems)
+                        if (enableEditorLogging) Log.d("Editor Logging", "Extracted ${allItems.size} strokes via recursive parsing.")
+                    } catch (e: Exception) {
+                        Log.e("Editor Logging", "Failed to recursively parse strokes: ${e.message}")
                     }
                     
                     // Evaluate Best String Match 
@@ -697,5 +714,38 @@ class MyScriptService(private val context: Context, private val listener: Recogn
     
     companion object {
         private const val TAG = "MyScriptService"
+    }
+    private fun extractStrokesRecursive(element: JsonElement, allItems: MutableList<Item>) {
+        if (element.isJsonObject) {
+            val obj = element.asJsonObject
+            
+            // Check if this object contains X and Y arrays (which means it's a stroke)
+            val hasXArray = (obj.has("X") && obj.get("X").isJsonArray) || (obj.has("x") && obj.get("x").isJsonArray)
+            val hasYArray = (obj.has("Y") && obj.get("Y").isJsonArray) || (obj.has("y") && obj.get("y").isJsonArray)
+            
+            if (hasXArray && hasYArray) {
+                val xArray = obj.getAsJsonArray(if (obj.has("X")) "X" else "x")
+                val yArray = obj.getAsJsonArray(if (obj.has("Y")) "Y" else "y")
+                
+                val xList = mutableListOf<Float>()
+                val yList = mutableListOf<Float>()
+                for (i in 0 until xArray.size()) {
+                    xList.add(xArray.get(i).asFloat)
+                    yList.add(yArray.get(i).asFloat)
+                }
+                
+                val id = if (obj.has("id")) obj.get("id").asString else null
+                allItems.add(Item("stroke", id, xList, yList))
+            }
+            
+            // Recurse into all properties
+            for ((_, value) in obj.entrySet()) {
+                extractStrokesRecursive(value, allItems)
+            }
+        } else if (element.isJsonArray) {
+            for (item in element.asJsonArray) {
+                extractStrokesRecursive(item, allItems)
+            }
+        }
     }
 }

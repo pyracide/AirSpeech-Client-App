@@ -469,6 +469,29 @@
                 android:checked="false" />
         </RelativeLayout>
 
+        <!-- JIIX Debug Mode toggle (shows a popup reconstructing what MyScript received) -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/bottom_sheet_default_row_margin">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:text="JIIX Stroke Debug"
+                android:textColor="@color/bottom_sheet_text_color"
+                android:textSize="@dimen/bottom_sheet_text_size" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/jiix_debug_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentRight="true"
+                android:layout_centerVertical="true"
+                android:checked="false" />
+        </RelativeLayout>
+
         <!-- Delegate selection row -->
         <RelativeLayout
             android:layout_width="match_parent"

@@ -373,18 +373,13 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val thumbIndexApart = ratio > 0.95
             isClearGesture = fingersOpen && thumbIndexApart && !isWriting
         } else {
-            // First Person Mode: 4 fingers straight + sum > 320%
-            val indexSim = getFingerStraightness(indexMCP, landmarks[6], indexTip)
-            val middleSim = getFingerStraightness(middleMCP, landmarks[10], middleTip)
-            val ringSim = getFingerStraightness(ringMCP, landmarks[14], ringTip)
-            val pinkySim = getFingerStraightness(pinkyMCP, landmarks[18], pinkyTip)
+            // First Person Mode: 4 fingers straight
+            val indexStraight = isFingerStraight(indexMCP, landmarks[6], indexTip)
+            val middleStraight = isFingerStraight(middleMCP, landmarks[10], middleTip)
+            val ringStraight = isFingerStraight(ringMCP, landmarks[14], ringTip)
+            val pinkyStraight = isFingerStraight(pinkyMCP, landmarks[18], pinkyTip)
             
-            val totalSim = indexSim + middleSim + ringSim + pinkySim
-            
-            // Per finger threshold: 0.75 (75%)
-            // Total threshold: 3.2 (320%)
-            val allStraight = indexSim > 0.75f && middleSim > 0.75f && ringSim > 0.75f && pinkySim > 0.75f
-            isClearGesture = allStraight && totalSim > 3.2f && !isWriting
+            isClearGesture = indexStraight && middleStraight && ringStraight && pinkyStraight && !isWriting
         }
         
         if (isClearGesture) {
@@ -417,8 +412,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2))
     }
     
-    // Returns the 2D vector similarity (cosine) between MCP->PIP and PIP->Tip
-    private fun getFingerStraightness(mcp: NormalizedLandmark, pip: NormalizedLandmark, tip: NormalizedLandmark): Float {
+    // Checks if the 2D vector from knuckle to PIP is within a similarity threshold (cosine) to PIP to Tip
+    private fun isFingerStraight(mcp: NormalizedLandmark, pip: NormalizedLandmark, tip: NormalizedLandmark, threshold: Float = 0.75f): Boolean {
         val mcpX = mcp.x() * imageWidth * scaleFactor
         val mcpY = mcp.y() * imageHeight * scaleFactor
         val pipX = pip.x() * imageWidth * scaleFactor
@@ -435,13 +430,9 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         val mag1 = sqrt((v1x * v1x + v1y * v1y).toDouble()).toFloat()
         val mag2 = sqrt((v2x * v2x + v2y * v2y).toDouble()).toFloat()
         
-        if (mag1 == 0f || mag2 == 0f) return 0f
-        return dotProduct / (mag1 * mag2)
-    }
-
-    // Checks if the 2D vector from knuckle to PIP is within a similarity threshold (cosine) to PIP to Tip
-    private fun isFingerStraight(mcp: NormalizedLandmark, pip: NormalizedLandmark, tip: NormalizedLandmark, threshold: Float = 0.75f): Boolean {
-        return getFingerStraightness(mcp, pip, tip) > threshold
+        if (mag1 == 0f || mag2 == 0f) return false
+        val cosTheta = dotProduct / (mag1 * mag2)
+        return cosTheta > threshold
     }
 
     companion object {
