@@ -91,6 +91,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         fun onZoneChanged(zone: Int)
         fun onHandPresence(detected: Boolean)
         fun onAbort()
+        fun onDrawingStateChanged(isWriting: Boolean)
     }
 
     init {
@@ -321,7 +322,12 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         } else {
             strokeListener?.onHandPresence(false)
             if (isWriting || drawnPaths.isNotEmpty() || currentPath != null) {
-                isWriting = false
+                if (isWriting) {
+                    isWriting = false
+                    strokeListener?.onDrawingStateChanged(false)
+                } else {
+                    isWriting = false
+                }
                 currentPath = null
                 drawnPaths.clear()
                 currentStrokePoints.clear()
@@ -384,6 +390,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         var justStarted = false
         if (!isWriting && ratio < START_THRESHOLD) {
             isWriting = true
+            strokeListener?.onDrawingStateChanged(true)
             justStarted = true
             Log.d("OverlayView", "DOWN")
             // Start new path
@@ -399,9 +406,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val scaledX = (avgX * imageWidth * scaleFactor) * coordinateScale + offsetX
             val scaledY = (avgY * imageHeight * scaleFactor) * coordinateScale + offsetY
             currentStrokePoints.add(MyScriptService.PointData(scaledX, scaledY, System.currentTimeMillis()))
-        } else if (isWriting && ratio > STOP_THRESHOLD) {
-            isWriting = false
-            Log.d("OverlayView", "UP")
+         } else if (isWriting && ratio > STOP_THRESHOLD) {
+             isWriting = false
+             strokeListener?.onDrawingStateChanged(false)
+             Log.d("OverlayView", "UP")
             // Commit path
             currentPath?.let { drawnPaths.add(it) }
             currentPath = null

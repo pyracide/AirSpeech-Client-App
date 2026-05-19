@@ -111,10 +111,10 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
 
     
     private var myScriptService: MyScriptService? = null
-    private var udpHapticController = UdpHapticController { error ->
+    private var udpHapticController = UdpHapticController { status ->
         activity?.runOnUiThread {
             if (_fragmentCameraBinding != null) {
-                fragmentCameraBinding.textUdpStatus.text = "UDP: $error"
+                fragmentCameraBinding.textUdpStatus.text = "UDP: $status"
             }
         }
     }
@@ -389,6 +389,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 // Clear backend silently without committing
                 myScriptService?.clear()
             }
+            override fun onDrawingStateChanged(isWriting: Boolean) {
+                udpHapticController.onDrawingStateChanged(isWriting)
+            }
         }
 
         // Initialize UDP controller IP
@@ -461,6 +464,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 fragmentCameraBinding.textDebugCoords.visibility = View.VISIBLE
             }
             fragmentCameraBinding.overlay.isDrawingMode = isDrawingMode
+            udpHapticController.isDrawingMode = isDrawingMode
         }
 
         fragmentCameraBinding.btnResetLlmContext.setOnClickListener {

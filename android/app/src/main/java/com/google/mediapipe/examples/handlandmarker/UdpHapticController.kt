@@ -6,7 +6,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 
-class UdpHapticController(private val onError: ((String) -> Unit)? = null) {
+class UdpHapticController(private val onStatus: ((String) -> Unit)? = null) {
     private val port = 8282
     private var socket: DatagramSocket? = null
     
@@ -18,14 +18,19 @@ class UdpHapticController(private val onError: ((String) -> Unit)? = null) {
     private val scope = CoroutineScope(Dispatchers.IO + Job())
     private var proximJob: Job? = null
     
+    var isDrawingMode = false
+    private var isWriting = false
+    private var lastDrawingTime = 0L
+    
     init {
         scope.launch {
             try {
                 socket = DatagramSocket()
                 Log.d("UdpHaptic", "UDP DatagramSocket successfully initialized on background thread.")
+                onStatus?.invoke("Socket Initialized")
             } catch (e: Exception) {
                 Log.e("UdpHaptic", "Failed to create socket", e)
-                onError?.invoke("Init Error: ${e.localizedMessage}")
+                onStatus?.invoke("Init Error: ${e.localizedMessage}")
             }
         }
     }
@@ -35,6 +40,7 @@ class UdpHapticController(private val onError: ((String) -> Unit)? = null) {
         if (ip.isNotBlank() && ip != targetIp) {
             targetIp = ip
             Log.d("UdpHaptic", "Target IP updated to $targetIp")
+            onStatus?.invoke("Target: $ip")
         }
     }
     
@@ -51,6 +57,11 @@ class UdpHapticController(private val onError: ((String) -> Unit)? = null) {
                 currentZone = 0
             }
         }
+    }
+    
+    fun onDrawingStateChanged(writing: Boolean) {
+        isWriting = writing
+        lastDrawingTime = System.currentTimeMillis()
     }
     
     fun onZoneChanged(zone: Int) {
@@ -75,7 +86,19 @@ class UdpHapticController(private val onError: ((String) -> Unit)? = null) {
         proximJob?.cancel()
         proximJob = scope.launch {
             while (isActive && isHandDetected) {
-                sendPacket("PROXIM:$currentZone")
+                val zoneToSend = if (isDrawingMode) {
+                    val currentTime = System.currentTimeMillis()
+                    val isWithinGracePeriod = (currentTime - lastDrawingTime) <= 2000L
+                    if (isWriting || isWithinGracePeriod) {
+                        currentZone
+                    } else {
+                        0
+                    }
+                } else {
+                    currentZone
+                }
+                
+                sendPacket("PROXIM:$zoneToSend")
                 delay(100) // 10Hz
             }
         }
@@ -90,7 +113,7 @@ class UdpHapticController(private val onError: ((String) -> Unit)? = null) {
         if (targetIp.isEmpty() || socket == null) {
             val reason = "targetIp: '$targetIp', socketInitialized: ${socket != null}"
             Log.w("UdpHaptic", "Skipping packet send. $reason")
-            onError?.invoke("Skipped send: $reason")
+            onStatus?.invoke("Skipped send: $reason")
             return
         }
         try {
@@ -99,9 +122,10 @@ class UdpHapticController(private val onError: ((String) -> Unit)? = null) {
             val packet = DatagramPacket(bytes, bytes.size, address, port)
             socket?.send(packet)
             Log.d("UdpHaptic", "Sent UDP message '$message' to $targetIp:$port")
+            onStatus?.invoke("Sent $message -> $targetIp")
         } catch (e: Exception) {
             Log.e("UdpHaptic", "Failed to send packet: $message to $targetIp", e)
-            onError?.invoke("Send Error: ${e.localizedMessage}")
+            onStatus?.invoke("Send Error: ${e.localizedMessage}")
         }
     }
     
