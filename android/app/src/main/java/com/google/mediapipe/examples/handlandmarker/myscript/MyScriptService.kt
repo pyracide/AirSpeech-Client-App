@@ -321,22 +321,25 @@ class MyScriptService(private val context: Context, private val listener: Recogn
         scope.launch(Dispatchers.Main) {
             try {
                 val pointerEvents = ArrayList<PointerEvent>()
+                val startTime = points.first().timestamp
                 
                 points.forEachIndexed { index, point ->
                     val xMm = converter!!.x_px2mm(point.x)
                     val yMm = converter!!.y_px2mm(point.y)
+                    val t = point.timestamp - startTime
                     
                     if (index == 0) {
-                        pointerEvents.add(PointerEvent(PointerEventType.DOWN, xMm, yMm, point.timestamp, 0f, PointerType.PEN, 0))
+                        pointerEvents.add(PointerEvent(PointerEventType.DOWN, xMm, yMm, t, 0f, PointerType.PEN, 0))
                     } else {
-                        pointerEvents.add(PointerEvent(PointerEventType.MOVE, xMm, yMm, point.timestamp, 0f, PointerType.PEN, 0))
+                        pointerEvents.add(PointerEvent(PointerEventType.MOVE, xMm, yMm, t, 0f, PointerType.PEN, 0))
                     }
                 }
                 
                 val lastPoint = points.last()
                 val lastXMm = converter!!.x_px2mm(lastPoint.x)
                 val lastYMm = converter!!.y_px2mm(lastPoint.y)
-                pointerEvents.add(PointerEvent(PointerEventType.UP, lastXMm, lastYMm, lastPoint.timestamp, 0f, PointerType.PEN, 0))
+                val lastT = lastPoint.timestamp - startTime
+                pointerEvents.add(PointerEvent(PointerEventType.UP, lastXMm, lastYMm, lastT, 0f, PointerType.PEN, 0))
 
                 offscreenEditor?.addStrokes(pointerEvents.toTypedArray(), true)
             } catch (e: Exception) {

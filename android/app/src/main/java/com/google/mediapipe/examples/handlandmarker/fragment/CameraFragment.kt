@@ -46,6 +46,7 @@ import com.google.mediapipe.examples.handlandmarker.MainViewModel
 import com.google.mediapipe.examples.handlandmarker.OverlayView
 import com.google.mediapipe.examples.handlandmarker.R
 import com.google.mediapipe.examples.handlandmarker.SmartGlassesStreamService
+import com.google.mediapipe.examples.handlandmarker.UdpHapticController
 import com.google.mediapipe.examples.handlandmarker.H264Decoder
 import com.google.mediapipe.examples.handlandmarker.databinding.FragmentCameraBinding
 import com.google.mediapipe.examples.handlandmarker.databinding.InfoBottomSheetBinding
@@ -110,6 +111,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
 
     
     private var myScriptService: MyScriptService? = null
+    private var udpHapticController = UdpHapticController()
     private var tts: TextToSpeech? = null
     private var settingsDialog: BottomSheetDialog? = null
     private var bottomSheetBinding: InfoBottomSheetBinding? = null
@@ -366,7 +368,19 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                     fragmentCameraBinding.textDebugCoords.text = "X: ${x.toInt()}, Y: ${y.toInt()}"
                 }
             }
+            override fun onZoneChanged(zone: Int) {
+                udpHapticController.onZoneChanged(zone)
+                activity?.runOnUiThread {
+                    fragmentCameraBinding.textDrawingZone.text = "Drawing Zone: $zone"
+                }
+            }
+            override fun onHandPresence(detected: Boolean) {
+                udpHapticController.onHandPresenceChanged(detected)
+            }
         }
+
+        // Initialize UDP controller IP
+        udpHapticController.updateTargetIp(lastSocketUrl)
 
         updateWideAngleButtonVisibility()
 
@@ -577,6 +591,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                     val url = input.text.toString()
                     if (url.isNotBlank()) {
                         lastSocketUrl = url
+                        udpHapticController.updateTargetIp(url)
                         val mode = when(radioGroup.checkedRadioButtonId) {
                             rbH264Classic.id -> MODE_H264_CLASSIC
                             rbRtsp.id -> MODE_H264_RTSP
@@ -813,8 +828,6 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         processingRunnable = null
     }
 
-    
-
     private fun adjustAspectRatio(videoWidth: Int, videoHeight: Int) {
         val container = fragmentCameraBinding.smartGlassesH264View.parent as? View ?: return
         val containerWidth = container.width
@@ -863,8 +876,6 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             fragmentCameraBinding.smartGlassesH264View.setTransform(null)
         }
     }
-
-
     
     private fun disableSmartGlasses() {
         isSmartGlassesMode = false

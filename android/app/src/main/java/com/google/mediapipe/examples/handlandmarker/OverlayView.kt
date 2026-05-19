@@ -41,6 +41,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     private var pointPaint = Paint()
     private var drawingPaint = Paint()
     private var drawingDotPaint = Paint()
+    private var centerDotPaint = Paint()
 
     private var scaleFactor: Float = 1f
     private var imageWidth: Int = 1
@@ -87,6 +88,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         fun onDoublePinch()
         fun onTriplePinch()
         fun onDebugCoords(x: Float, y: Float)
+        fun onZoneChanged(zone: Int)
+        fun onHandPresence(detected: Boolean)
     }
 
     init {
@@ -136,6 +139,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         drawingDotPaint.color = Color.GREEN
         drawingDotPaint.strokeWidth = LANDMARK_STROKE_WIDTH * 2
         drawingDotPaint.style = Paint.Style.FILL
+        
+        centerDotPaint.color = Color.MAGENTA
+        centerDotPaint.style = Paint.Style.FILL
+        centerDotPaint.isAntiAlias = true
     }
 
     override fun draw(canvas: Canvas) {
@@ -215,6 +222,23 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                 }
             }
         }
+        
+        // Draw center point if not writing
+        if (!isWriting && results?.landmarks()?.isNotEmpty() == true) {
+            val landmark = results!!.landmarks().first()
+            val j5 = landmark[5]
+            val j9 = landmark[9]
+            val j13 = landmark[13]
+            val centerX = (j5.x() + j9.x() + j13.x()) / 3f
+            val centerY = (j5.y() + j9.y() + j13.y()) / 3f
+            
+            canvas.drawCircle(
+                centerX * imageWidth * scaleFactor + offsetX,
+                centerY * imageHeight * scaleFactor + offsetY,
+                15f,
+                centerDotPaint
+            )
+        }
     }
 
     fun setResults(
@@ -248,7 +272,37 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         offsetY = (height - imageHeight * scaleFactor) / 2f
 
         if (handLandmarkerResults.landmarks().isNotEmpty()) {
+            strokeListener?.onHandPresence(true)
             val firstHand = handLandmarkerResults.landmarks().first()
+            
+            // Calculate drawing zone
+            val j5 = firstHand[5]
+            val j9 = firstHand[9]
+            val j13 = firstHand[13]
+            val centerX = (j5.x() + j9.x() + j13.x()) / 3f
+            val centerY = (j5.y() + j9.y() + j13.y()) / 3f
+            
+            val distToEdgeX = minOf(centerX, 1f - centerX)
+            val distToEdgeY = minOf(centerY, 1f - centerY)
+            
+            // Map X distance to equivalent Y distance scales to use a single max zone
+            // X Zone 4: < 0.08, Zone 3: < 0.16, Zone 2: < 0.24
+            // Y Zone 4: < 0.10, Zone 3: < 0.20, Zone 2: < 0.30
+            val zoneX = when {
+                distToEdgeX < 0.08f -> 4
+                distToEdgeX < 0.16f -> 3
+                distToEdgeX < 0.24f -> 2
+                else -> 1
+            }
+            val zoneY = when {
+                distToEdgeY < 0.10f -> 4
+                distToEdgeY < 0.20f -> 3
+                distToEdgeY < 0.30f -> 2
+                else -> 1
+            }
+            val zone = maxOf(zoneX, zoneY)
+            strokeListener?.onZoneChanged(zone)
+            
             if (isDrawingMode) {
                 processGesture(firstHand)
             } else {
@@ -262,6 +316,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                 val y = avgY * imageHeight * scaleFactor + offsetY
                 strokeListener?.onDebugCoords(x, y)
             }
+        } else {
+            strokeListener?.onHandPresence(false)
         }
 
         invalidate()
