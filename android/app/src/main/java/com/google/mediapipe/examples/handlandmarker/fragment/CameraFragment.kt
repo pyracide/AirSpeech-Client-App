@@ -111,7 +111,14 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
 
     
     private var myScriptService: MyScriptService? = null
-    private var udpHapticController = UdpHapticController()
+    private var udpHapticController = UdpHapticController { error ->
+        activity?.runOnUiThread {
+            if (_fragmentCameraBinding != null) {
+                fragmentCameraBinding.textUdpStatus.text = "UDP: $error"
+            }
+        }
+    }
+    private var isUdpTargetPc = false
     private var tts: TextToSpeech? = null
     private var settingsDialog: BottomSheetDialog? = null
     private var bottomSheetBinding: InfoBottomSheetBinding? = null
@@ -371,16 +378,21 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             override fun onZoneChanged(zone: Int) {
                 udpHapticController.onZoneChanged(zone)
                 activity?.runOnUiThread {
-                    fragmentCameraBinding.textDrawingZone.text = "Drawing Zone: $zone"
+                    val dest = if (isUdpTargetPc) "PC" else "Wearable"
+                    fragmentCameraBinding.textDrawingZone.text = "Drawing Zone: $zone ($dest)"
                 }
             }
             override fun onHandPresence(detected: Boolean) {
                 udpHapticController.onHandPresenceChanged(detected)
             }
+            override fun onAbort() {
+                // Clear backend silently without committing
+                myScriptService?.clear()
+            }
         }
 
         // Initialize UDP controller IP
-        udpHapticController.updateTargetIp(lastSocketUrl)
+        updateUdpTargetIp()
 
         updateWideAngleButtonVisibility()
 
@@ -591,7 +603,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                     val url = input.text.toString()
                     if (url.isNotBlank()) {
                         lastSocketUrl = url
-                        udpHapticController.updateTargetIp(url)
+                        updateUdpTargetIp()
                         val mode = when(radioGroup.checkedRadioButtonId) {
                             rbH264Classic.id -> MODE_H264_CLASSIC
                             rbRtsp.id -> MODE_H264_RTSP
@@ -925,6 +937,14 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         }
     }
 
+    private fun updateUdpTargetIp() {
+        if (isUdpTargetPc) {
+            udpHapticController.updateTargetIp("ws://192.168.1.83:81")
+        } else {
+            udpHapticController.updateTargetIp(lastSocketUrl)
+        }
+    }
+
     private fun updateWideAngleButtonVisibility() {
         if (cameraFacing == CameraSelector.LENS_FACING_BACK) {
             fragmentCameraBinding.btnWideAngle.visibility = View.VISIBLE
@@ -1074,6 +1094,12 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             } else {
                 fragmentCameraBinding.jiixDebugView.dismiss()
             }
+        }
+
+        bottomSheetBinding!!.udpTargetPcSwitch.isChecked = isUdpTargetPc
+        bottomSheetBinding!!.udpTargetPcSwitch.setOnCheckedChangeListener { _, isChecked ->
+            isUdpTargetPc = isChecked
+            updateUdpTargetIp()
         }
 
         bottomSheetBinding!!.spinnerRecognitionMode.setSelection(getDecoderModeIndex(), false)

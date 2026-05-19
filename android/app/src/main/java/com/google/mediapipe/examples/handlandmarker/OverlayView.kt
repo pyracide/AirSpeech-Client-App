@@ -90,6 +90,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         fun onDebugCoords(x: Float, y: Float)
         fun onZoneChanged(zone: Int)
         fun onHandPresence(detected: Boolean)
+        fun onAbort()
     }
 
     init {
@@ -223,8 +224,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             }
         }
         
-        // Draw center point if not writing
-        if (!isWriting && results?.landmarks()?.isNotEmpty() == true) {
+        // Draw center point
+        if (results?.landmarks()?.isNotEmpty() == true) {
             val landmark = results!!.landmarks().first()
             val j5 = landmark[5]
             val j9 = landmark[9]
@@ -301,7 +302,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                 else -> 1
             }
             val zone = maxOf(zoneX, zoneY)
-            strokeListener?.onZoneChanged(zone)
+            val effectiveZone = if (isDrawingMode && !isWriting) 1 else zone
+            strokeListener?.onZoneChanged(effectiveZone)
             
             if (isDrawingMode) {
                 processGesture(firstHand)
@@ -318,6 +320,14 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             }
         } else {
             strokeListener?.onHandPresence(false)
+            if (isWriting || drawnPaths.isNotEmpty() || currentPath != null) {
+                isWriting = false
+                currentPath = null
+                drawnPaths.clear()
+                currentStrokePoints.clear()
+                invalidate()
+                strokeListener?.onAbort()
+            }
         }
 
         invalidate()

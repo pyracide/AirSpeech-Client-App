@@ -6,7 +6,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 
-class UdpHapticController {
+class UdpHapticController(private val onError: ((String) -> Unit)? = null) {
     private val port = 8282
     private var socket: DatagramSocket? = null
     
@@ -19,10 +19,14 @@ class UdpHapticController {
     private var proximJob: Job? = null
     
     init {
-        try {
-            socket = DatagramSocket()
-        } catch (e: Exception) {
-            Log.e("UdpHaptic", "Failed to create socket", e)
+        scope.launch {
+            try {
+                socket = DatagramSocket()
+                Log.d("UdpHaptic", "UDP DatagramSocket successfully initialized on background thread.")
+            } catch (e: Exception) {
+                Log.e("UdpHaptic", "Failed to create socket", e)
+                onError?.invoke("Init Error: ${e.localizedMessage}")
+            }
         }
     }
     
@@ -83,14 +87,21 @@ class UdpHapticController {
     }
     
     private fun sendPacket(message: String) {
-        if (targetIp.isEmpty() || socket == null) return
+        if (targetIp.isEmpty() || socket == null) {
+            val reason = "targetIp: '$targetIp', socketInitialized: ${socket != null}"
+            Log.w("UdpHaptic", "Skipping packet send. $reason")
+            onError?.invoke("Skipped send: $reason")
+            return
+        }
         try {
             val address = InetAddress.getByName(targetIp)
             val bytes = message.toByteArray(Charsets.UTF_8)
             val packet = DatagramPacket(bytes, bytes.size, address, port)
             socket?.send(packet)
+            Log.d("UdpHaptic", "Sent UDP message '$message' to $targetIp:$port")
         } catch (e: Exception) {
-            Log.e("UdpHaptic", "Failed to send packet: $message", e)
+            Log.e("UdpHaptic", "Failed to send packet: $message to $targetIp", e)
+            onError?.invoke("Send Error: ${e.localizedMessage}")
         }
     }
     

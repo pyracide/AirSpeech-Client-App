@@ -492,6 +492,29 @@
                 android:checked="false" />
         </RelativeLayout>
 
+        <!-- UDP Target PC Toggle -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/bottom_sheet_default_row_margin">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:text="Target PC (192.168.1.83)"
+                android:textColor="@color/bottom_sheet_text_color"
+                android:textSize="@dimen/bottom_sheet_text_size" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/udp_target_pc_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentRight="true"
+                android:layout_centerVertical="true"
+                android:checked="false" />
+        </RelativeLayout>
+
         <!-- Delegate selection row -->
         <RelativeLayout
             android:layout_width="match_parent"

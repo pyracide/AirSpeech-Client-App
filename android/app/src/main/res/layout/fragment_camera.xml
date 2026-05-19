@@ -296,6 +296,14 @@
             android:text="Drawing Zone: 1" />
 
         <TextView
+            android:id="@+id/text_udp_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FF0000"
+            android:textSize="10sp"
+            android:text="UDP: Idle" />
+
+        <TextView
             android:id="@+id/text_camera_fps"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
