@@ -187,50 +187,48 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             
         } else {
             // Normal Skeleton Mode
-            if (isDebugOverlayEnabled) {
-                results?.let { handLandmarkerResult ->
-                    for (landmark in handLandmarkerResult.landmarks()) {
-                        // Check straight fingers for First Person mode
-                        val indexStraight = isFingerStraight(landmark[5], landmark[6], landmark[8])
-                        val middleStraight = isFingerStraight(landmark[9], landmark[10], landmark[12])
-                        val ringStraight = isFingerStraight(landmark[13], landmark[14], landmark[16])
-                        val pinkyStraight = isFingerStraight(landmark[17], landmark[18], landmark[20])
+            results?.let { handLandmarkerResult ->
+                for (landmark in handLandmarkerResult.landmarks()) {
+                    // Check straight fingers for First Person mode
+                    val indexStraight = isFingerStraight(landmark[5], landmark[6], landmark[8])
+                    val middleStraight = isFingerStraight(landmark[9], landmark[10], landmark[12])
+                    val ringStraight = isFingerStraight(landmark[13], landmark[14], landmark[16])
+                    val pinkyStraight = isFingerStraight(landmark[17], landmark[18], landmark[20])
+                    
+                    for (normalizedLandmark in landmark) {
+                        canvas.drawPoint(
+                            normalizedLandmark.x() * imageWidth * scaleFactor + offsetX,
+                            normalizedLandmark.y() * imageHeight * scaleFactor + offsetY,
+                            pointPaint
+                        )
+                    }
+
+                    HandLandmarker.HAND_CONNECTIONS.forEach { connection ->
+                        val startIdx = connection!!.start()
+                        val endIdx = connection.end()
                         
-                        for (normalizedLandmark in landmark) {
-                            canvas.drawPoint(
-                                normalizedLandmark.x() * imageWidth * scaleFactor + offsetX,
-                                normalizedLandmark.y() * imageHeight * scaleFactor + offsetY,
-                                pointPaint
-                            )
+                        // Determine if this connection belongs to a straight finger
+                        val isStraightFinger = when {
+                            startIdx in 5..8 && endIdx in 5..8 -> indexStraight
+                            startIdx in 9..12 && endIdx in 9..12 -> middleStraight
+                            startIdx in 13..16 && endIdx in 13..16 -> ringStraight
+                            startIdx in 17..20 && endIdx in 17..20 -> pinkyStraight
+                            else -> false
+                        }
+                        
+                        val currentPaint = if (isStraightFinger) {
+                            android.graphics.Paint(linePaint).apply { color = android.graphics.Color.GREEN }
+                        } else {
+                            linePaint
                         }
 
-                        HandLandmarker.HAND_CONNECTIONS.forEach { connection ->
-                            val startIdx = connection!!.start()
-                            val endIdx = connection.end()
-                            
-                            // Determine if this connection belongs to a straight finger
-                            val isStraightFinger = when {
-                                startIdx in 5..8 && endIdx in 5..8 -> indexStraight
-                                startIdx in 9..12 && endIdx in 9..12 -> middleStraight
-                                startIdx in 13..16 && endIdx in 13..16 -> ringStraight
-                                startIdx in 17..20 && endIdx in 17..20 -> pinkyStraight
-                                else -> false
-                            }
-                            
-                            val currentPaint = if (isStraightFinger) {
-                                android.graphics.Paint(linePaint).apply { color = android.graphics.Color.GREEN }
-                            } else {
-                                linePaint
-                            }
-
-                            canvas.drawLine(
-                                landmark[startIdx].x() * imageWidth * scaleFactor + offsetX,
-                                landmark[startIdx].y() * imageHeight * scaleFactor + offsetY,
-                                landmark[endIdx].x() * imageWidth * scaleFactor + offsetX,
-                                landmark[endIdx].y() * imageHeight * scaleFactor + offsetY,
-                                currentPaint
-                            )
-                        }
+                        canvas.drawLine(
+                            landmark[startIdx].x() * imageWidth * scaleFactor + offsetX,
+                            landmark[startIdx].y() * imageHeight * scaleFactor + offsetY,
+                            landmark[endIdx].x() * imageWidth * scaleFactor + offsetX,
+                            landmark[endIdx].y() * imageHeight * scaleFactor + offsetY,
+                            currentPaint
+                        )
                     }
                 }
             }

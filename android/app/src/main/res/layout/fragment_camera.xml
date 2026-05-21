@@ -26,6 +26,8 @@
         android:layout_height="0dp"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toTopOf="@id/ink_preview_container"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
         app:scaleType="fitCenter" />
         
     <!-- Smart Glasses Stream View (Initially Hidden) -->
@@ -37,7 +39,9 @@
         android:scaleType="fitCenter"
         android:background="#000000"
         app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder"/>
+        app:layout_constraintBottom_toBottomOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"/>
 
     <!-- Smart Glasses H.264 Texture View (Classic) -->
     <TextureView
@@ -46,7 +50,9 @@
         android:layout_height="0dp"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder"/>
+        app:layout_constraintBottom_toBottomOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"/>
 
     <!-- Smart Glasses H.264 RTSP View Container (for hardware transforms) -->
     <FrameLayout
@@ -55,7 +61,9 @@
         android:layout_height="0dp"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder">
+        app:layout_constraintBottom_toBottomOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
         
         <com.alexvas.rtsp.widget.RtspSurfaceView
             android:id="@+id/smart_glasses_rtsp_view"
@@ -68,7 +76,9 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintBottom_toBottomOf="@id/view_finder"/>
+        app:layout_constraintBottom_toBottomOf="@id/view_finder"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"/>
 
     <!-- JIIX Debug Overlay: reconstructs exactly what MyScript received.
          Shown only when jiix_debug_mode is toggled in Settings.

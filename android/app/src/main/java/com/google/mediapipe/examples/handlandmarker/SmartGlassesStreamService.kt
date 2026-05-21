@@ -26,6 +26,9 @@ class SmartGlassesStreamService(private val listener: StreamListener) {
     private var webSocket: WebSocket? = null
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS) // Keep-alive
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .writeTimeout(3, TimeUnit.SECONDS)
+        .pingInterval(2, TimeUnit.SECONDS) // Send ping frame every 2 seconds to keep-alive and detect connection loss
         .build()
 
     // Channel to handle backpressure (drop old frames)
@@ -39,6 +42,7 @@ class SmartGlassesStreamService(private val listener: StreamListener) {
     }
 
     fun connect(url: String, h264Mode: Boolean = false) {
+        disconnect() // Clean up any previous connection immediately
         isH264Mode = h264Mode
         val request = Request.Builder().url(url).build()
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -74,8 +78,17 @@ class SmartGlassesStreamService(private val listener: StreamListener) {
     }
 
     fun disconnect() {
-        webSocket?.close(1000, "User disconnected")
+        try {
+            webSocket?.cancel() // Forcefully drop and close connection
+        } catch (e: Exception) {
+            Log.e(TAG, "Error cancelling websocket", e)
+        }
         webSocket = null
+        try {
+            client.connectionPool.evictAll() // Evict idle connections in pool
+        } catch (e: Exception) {
+            Log.e(TAG, "Error evicting connection pool", e)
+        }
     }
 
     private fun startFrameProcessor() {

@@ -127,4 +127,10 @@ dependencies {
 
     // RTSP Client for low latency
     implementation 'com.github.alexeyvasilyev:rtsp-client-android:5.6.4'
+
+    // Media3 container for NalUnitUtil (needed for shadowed RtspProcessor)
+    implementation 'androidx.media3:media3-container:1.1.0'
+
+    // JCodec for SPS/VUI parsing (needed for shadowed RtspProcessor)
+    implementation 'org.jcodec:jcodec:0.2.5'
 }

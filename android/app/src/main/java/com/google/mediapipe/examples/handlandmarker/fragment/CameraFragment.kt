@@ -100,6 +100,14 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var isSmartGlassesMode = false
     private var isSmartGlassesFlipped = false
     private var isSmartGlassesMirrored = false
+    private var isMjpegMirrored = false
+    private var isRtspMirrored = false
+    private val isCurrentModeMirrored: Boolean
+        get() = when (currentStreamMode) {
+            MODE_CLASSIC -> isMjpegMirrored
+            MODE_H264_RTSP -> isRtspMirrored
+            else -> false
+        }
     private var smartGlassesService: SmartGlassesStreamService? = null
     private var lastSocketUrl = "ws://192.168.1.65:81"
     private var defaultHomeMjpeg = "ws://192.168.1.65:81"
@@ -114,6 +122,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     // Polling for RtspSurfaceView
     private var processingRunnable: Runnable? = null
     private val processingHandler = Handler(Looper.getMainLooper())
+    private val rtspReconnectHandler = Handler(Looper.getMainLooper())
+    private var rtspReconnectRunnable: Runnable? = null
 
 
     
@@ -181,10 +191,15 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 handLandmarkerHelper.setupHandLandmarker()
             }
         }
+
+        if (isSmartGlassesMode) {
+            enableSmartGlasses(lastSocketUrl, currentStreamMode)
+        }
     }
 
     override fun onPause() {
         super.onPause()
+        cancelRtspReconnect()
         if(this::handLandmarkerHelper.isInitialized) {
             viewModel.setMaxHands(handLandmarkerHelper.maxNumHands)
             viewModel.setMinHandDetectionConfidence(handLandmarkerHelper.minHandDetectionConfidence)
@@ -198,6 +213,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         
         // Stop Smart Glasses if running
         smartGlassesService?.disconnect()
+        if (isSmartGlassesMode && currentStreamMode == MODE_H264_RTSP) {
+            releaseRtspPlayer()
+        }
     }
 
     override fun onDestroyView() {
@@ -238,6 +256,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     @SuppressLint("MissingPermission")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        
+        loadConnectionSettings()
 
         // Initialize our background executor
         backgroundExecutor = Executors.newSingleThreadExecutor()
@@ -289,7 +309,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 if (this@CameraFragment::backgroundExecutor.isInitialized && !backgroundExecutor.isShutdown) {
                     backgroundExecutor.execute {
                         if (!isBlinking) {
-                            handLandmarkerHelper.detectLiveStreamBitmap(bitmap, isSmartGlassesFlipped, isSmartGlassesMirrored)
+                            handLandmarkerHelper.detectLiveStreamBitmap(bitmap, isSmartGlassesFlipped, isMjpegMirrored)
                         }
                     }
                 }
@@ -543,23 +563,13 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
 
         fragmentCameraBinding.btnMirrorCamera.setOnClickListener {
             if (isSmartGlassesMode) {
-                isSmartGlassesMirrored = !isSmartGlassesMirrored
-                val rotation = if (isSmartGlassesMirrored) 180f else 0f
-                val scale = if (isSmartGlassesMirrored) -1f else 1f
-                
-                // MJPEG and TextureView work with standard rotations
-                fragmentCameraBinding.smartGlassesView.rotationY = rotation
-                fragmentCameraBinding.smartGlassesH264View.rotationY = rotation
-                
-                // RTSP SurfaceView: Apply BOTH scale and rotation to the container and the view
-                // This is the most aggressive way to force the Hardware Composer to flip
-                fragmentCameraBinding.smartGlassesRtspContainer.scaleX = scale
-                fragmentCameraBinding.smartGlassesRtspView.scaleX = scale
-                fragmentCameraBinding.smartGlassesRtspView.rotationY = rotation
-
-                fragmentCameraBinding.btnMirrorCamera.setBackgroundResource(
-                    if (isSmartGlassesMirrored) R.drawable.glass_button_active_bg else R.drawable.glass_button_bg
-                )
+                if (currentStreamMode == MODE_CLASSIC) {
+                    isMjpegMirrored = !isMjpegMirrored
+                } else if (currentStreamMode == MODE_H264_RTSP) {
+                    isRtspMirrored = !isRtspMirrored
+                }
+                applyMirroringState()
+                saveConnectionSettings()
             }
         }
 
@@ -645,7 +655,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                         backgroundExecutor.execute {
                             try {
                                 if (!isBlinking) {
-                                    handLandmarkerHelper.detectLiveStreamBitmap(bitmapToProcess, isSmartGlassesFlipped, isSmartGlassesMirrored)
+                                    handLandmarkerHelper.detectLiveStreamBitmap(bitmapToProcess, isSmartGlassesFlipped, isCurrentModeMirrored)
                                 }
                                 // Return the bitmap to the pool when done
                                 synchronized(bufferLock) {
@@ -865,6 +875,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                             else -> MODE_CLASSIC
                         }
                         enableSmartGlasses(url, mode)
+                        saveConnectionSettings()
                     }
                 }
                 .setNegativeButton("Cancel", null)
@@ -878,6 +889,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private fun enableSmartGlasses(url: String, mode: Int) {
         isSmartGlassesMode = true
         currentStreamMode = mode
+        applyMirroringState()
         fragmentCameraBinding.overlay.isCenterCrop = (mode == MODE_H264_RTSP)
         
         // 1. Unbind local camera
@@ -1006,7 +1018,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             backgroundExecutor.execute {
                 try {
                     if (!isBlinking && bufferReading != null) {
-                        handLandmarkerHelper.detectLiveStreamBitmap(bufferReading!!, isSmartGlassesFlipped, isSmartGlassesMirrored)
+                        handLandmarkerHelper.detectLiveStreamBitmap(bufferReading!!, isSmartGlassesFlipped, isCurrentModeMirrored)
                     } else {
                         isProcessingFrame.set(false)
                     }
@@ -1038,11 +1050,53 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                     // Re-init bitmaps if aspect ratio changed significantly
                     reinitScraperBitmaps()
                 }
+
+                override fun onRtspStatusConnecting() {
+                    Log.d(TAG, "RTSP Connecting to $url...")
+                }
+
+                override fun onRtspStatusConnected() {
+                    Log.d(TAG, "RTSP Connected to $url")
+                    cancelRtspReconnect()
+                }
+
+                override fun onRtspStatusDisconnected() {
+                    Log.d(TAG, "RTSP Disconnected from $url")
+                    scheduleRtspReconnect(url)
+                }
+
+                override fun onRtspStatusFailed(message: String?) {
+                    Log.e(TAG, "RTSP Connection Failed for $url: $message")
+                    scheduleRtspReconnect(url)
+                }
             })
             
             // API 5.6.4 uses requestVideo/requestAudio
             start(requestVideo = true, requestAudio = false)
         }
+    }
+
+    private fun scheduleRtspReconnect(url: String) {
+        if (!isSmartGlassesMode || currentStreamMode != MODE_H264_RTSP || !isAdded) return
+        if (rtspReconnectRunnable != null) return // Already scheduled
+        
+        Log.d(TAG, "Scheduling RTSP reconnect in 3 seconds...")
+        rtspReconnectRunnable = Runnable {
+            rtspReconnectRunnable = null
+            if (isSmartGlassesMode && currentStreamMode == MODE_H264_RTSP && isAdded) {
+                Log.d(TAG, "Reconnecting RTSP stream to $url")
+                releaseRtspPlayer()
+                setupRtspPlayer(url)
+            }
+        }
+        rtspReconnectHandler.postDelayed(rtspReconnectRunnable!!, 3000)
+    }
+
+    private fun cancelRtspReconnect() {
+        rtspReconnectRunnable?.let {
+            rtspReconnectHandler.removeCallbacks(it)
+        }
+        rtspReconnectRunnable = null
     }
 
     private fun reinitScraperBitmaps() {
@@ -1090,9 +1144,41 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     }
 
     private fun releaseRtspPlayer() {
+        cancelRtspReconnect()
         fragmentCameraBinding.smartGlassesRtspView.stop()
         processingRunnable?.let { processingHandler.removeCallbacks(it) }
         processingRunnable = null
+    }
+
+    private fun applyMirroringState() {
+        val mirrored = isCurrentModeMirrored
+        if (currentStreamMode == MODE_CLASSIC) {
+            fragmentCameraBinding.smartGlassesView.scaleX = if (mirrored) -1f else 1f
+        } else if (currentStreamMode == MODE_H264_RTSP) {
+            fragmentCameraBinding.smartGlassesRtspContainer.scaleX = if (mirrored) -1f else 1f
+            fragmentCameraBinding.smartGlassesRtspView.scaleX = if (mirrored) -1f else 1f
+        }
+    }
+
+    private fun saveConnectionSettings() {
+        val prefs = requireContext().getSharedPreferences("connection_settings", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putString("last_socket_url", lastSocketUrl)
+            putInt("current_stream_mode", currentStreamMode)
+            putBoolean("is_smart_glasses_mode", isSmartGlassesMode)
+            putBoolean("is_mjpeg_mirrored", isMjpegMirrored)
+            putBoolean("is_rtsp_mirrored", isRtspMirrored)
+            apply()
+        }
+    }
+
+    private fun loadConnectionSettings() {
+        val prefs = requireContext().getSharedPreferences("connection_settings", Context.MODE_PRIVATE)
+        lastSocketUrl = prefs.getString("last_socket_url", "ws://192.168.1.65:81") ?: "ws://192.168.1.65:81"
+        currentStreamMode = prefs.getInt("current_stream_mode", MODE_CLASSIC)
+        isSmartGlassesMode = prefs.getBoolean("is_smart_glasses_mode", false)
+        isMjpegMirrored = prefs.getBoolean("is_mjpeg_mirrored", false)
+        isRtspMirrored = prefs.getBoolean("is_rtsp_mirrored", false)
     }
 
     private fun adjustAspectRatio(videoWidth: Int, videoHeight: Int) {
@@ -1121,23 +1207,45 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         
         // Update LayoutParams for ALL relevant views to ensure pixel-perfect alignment
         fragmentCameraBinding.cameraContainer.post {
+            // Update ViewFinder (Local Camera)
+            val viewFinderParams = fragmentCameraBinding.viewFinder.layoutParams
+            if (viewFinderParams.width != finalWidth || viewFinderParams.height != finalHeight) {
+                viewFinderParams.width = finalWidth
+                viewFinderParams.height = finalHeight
+                fragmentCameraBinding.viewFinder.layoutParams = viewFinderParams
+            }
+
+            // Update Smart Glasses View (MJPEG)
+            val sgViewParams = fragmentCameraBinding.smartGlassesView.layoutParams
+            if (sgViewParams.width != finalWidth || sgViewParams.height != finalHeight) {
+                sgViewParams.width = finalWidth
+                sgViewParams.height = finalHeight
+                fragmentCameraBinding.smartGlassesView.layoutParams = sgViewParams
+            }
+
             // Update H264 TextureView (Classic)
             val h264Params = fragmentCameraBinding.smartGlassesH264View.layoutParams
-            h264Params.width = finalWidth
-            h264Params.height = finalHeight
-            fragmentCameraBinding.smartGlassesH264View.layoutParams = h264Params
+            if (h264Params.width != finalWidth || h264Params.height != finalHeight) {
+                h264Params.width = finalWidth
+                h264Params.height = finalHeight
+                fragmentCameraBinding.smartGlassesH264View.layoutParams = h264Params
+            }
             
             // Update RTSP SurfaceView Container
             val rtspContainerParams = fragmentCameraBinding.smartGlassesRtspContainer.layoutParams
-            rtspContainerParams.width = finalWidth
-            rtspContainerParams.height = finalHeight
-            fragmentCameraBinding.smartGlassesRtspContainer.layoutParams = rtspContainerParams
+            if (rtspContainerParams.width != finalWidth || rtspContainerParams.height != finalHeight) {
+                rtspContainerParams.width = finalWidth
+                rtspContainerParams.height = finalHeight
+                fragmentCameraBinding.smartGlassesRtspContainer.layoutParams = rtspContainerParams
+            }
             
             // Update OverlayView
             val overlayParams = fragmentCameraBinding.overlay.layoutParams
-            overlayParams.width = finalWidth
-            overlayParams.height = finalHeight
-            fragmentCameraBinding.overlay.layoutParams = overlayParams
+            if (overlayParams.width != finalWidth || overlayParams.height != finalHeight) {
+                overlayParams.width = finalWidth
+                overlayParams.height = finalHeight
+                fragmentCameraBinding.overlay.layoutParams = overlayParams
+            }
             
             // Remove any previously applied matrix transforms
             fragmentCameraBinding.smartGlassesH264View.setTransform(null)
@@ -1162,12 +1270,19 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         fragmentCameraBinding.smartGlassesRtspContainer.visibility = View.GONE
         fragmentCameraBinding.btnMirrorCamera.visibility = View.GONE
         
+        // Reset scaleX for mirroring views
+        fragmentCameraBinding.smartGlassesView.scaleX = 1f
+        fragmentCameraBinding.smartGlassesRtspContainer.scaleX = 1f
+        fragmentCameraBinding.smartGlassesRtspView.scaleX = 1f
+        
         // 3. Rebind local camera
         fragmentCameraBinding.viewFinder.visibility = View.VISIBLE
         bindCameraUseCases()
         
         // Update Button visual state (optional)
         fragmentCameraBinding.btnSmartGlasses.clearColorFilter()
+
+        saveConnectionSettings()
     }
     
     private fun showSettingsDialog() {
@@ -1550,6 +1665,10 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     // Declare and bind preview, capture and analysis use cases
     @SuppressLint("UnsafeOptInUsageError")
     private fun bindCameraUseCases() {
+        if (isSmartGlassesMode) {
+            cameraProvider?.unbindAll()
+            return
+        }
 
         // CameraProvider
         val cameraProvider = cameraProvider
@@ -1666,6 +1785,11 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                         fragmentCameraBinding.overlay.clearTracking()
                         return@runOnUiThread
                     }
+                }
+
+                // If in local camera or MJPEG mode, adjust aspect ratio of views
+                if (!isSmartGlassesMode || currentStreamMode == MODE_CLASSIC) {
+                    adjustAspectRatio(resultBundle.inputImageWidth, resultBundle.inputImageHeight)
                 }
 
                 // Pass necessary information to OverlayView for drawing on the canvas
