@@ -18,7 +18,7 @@ class UdpHapticController(private val onStatus: ((String) -> Unit)? = null) {
     private val scope = CoroutineScope(Dispatchers.IO + Job())
     private var proximJob: Job? = null
     
-    var isDrawingMode = false
+    var isDrawingMode = true
     private var isWriting = false
     private var lastDrawingTime = 0L
     

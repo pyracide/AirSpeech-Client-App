@@ -322,6 +322,30 @@
             android:textColor="#00FF00"
             android:textSize="12sp"
             android:text="MP FPS: --" />
+
+        <TextView
+            android:id="@+id/text_timer_score"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#00FFFF"
+            android:textSize="12sp"
+            android:text="Timer: -- ms" />
+
+        <TextView
+            android:id="@+id/text_pinch_debug"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#E2E8F0"
+            android:textSize="12sp"
+            android:text="Pinch: S=--, P=--, R=--" />
+
+        <TextView
+            android:id="@+id/text_fist_clench_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#E2E8F0"
+            android:textSize="12sp"
+            android:text="Fist Clench: --" />
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

@@ -81,13 +81,14 @@ data class BoundingBox(
 class MyScriptService(private val context: Context, private val listener: RecognitionListener) {
 
     enum class DecoderMode {
+        LLM_RAW_TTS,
         LLM,
         NGRAM,
         NONE
     }
 
     interface RecognitionListener {
-        fun onTextRecognized(text: String, debugText: String = "")
+        fun onTextRecognized(text: String, debugText: String = "", rawText: String = "", llmText: String = "", jiixElapsedTime: Long = 0L, isIgnored: Boolean = false)
         fun onJiixReceived(items: List<Item>)
         fun onLlmStatus(status: String) {}
     }
@@ -103,9 +104,13 @@ class MyScriptService(private val context: Context, private val listener: Recogn
     private val undoBlocklist = mutableSetOf<String>()
     private var llmLoaded = false
     private var canUndo = false
+    private var lastTopOption: String? = null
+    private var nonIgnorableWordsSinceLast = 2
     
     private val enableEditorLogging = true
     private var isReady = false
+    @Volatile
+    var strokeStartTime = 0L
     private val isInitializing = AtomicBoolean(false)
 
     init {
@@ -133,7 +138,7 @@ class MyScriptService(private val context: Context, private val listener: Recogn
         languageModel.isDebugMode = enabled
     }
     
-    var decoderMode = DecoderMode.LLM
+    var decoderMode = DecoderMode.LLM_RAW_TTS
     var llmScalingMode = 0 // 0=Basic, 1=Softmax, 2=Off
     var oneWordOnly = true
     private var isDebugEnabled = false
@@ -143,6 +148,8 @@ class MyScriptService(private val context: Context, private val listener: Recogn
         llmContextWords.clear()
         undoBlocklist.clear()
         canUndo = false
+        lastTopOption = null
+        nonIgnorableWordsSinceLast = 2
         llmEngine.resetContext()
     }
 
@@ -365,6 +372,12 @@ class MyScriptService(private val context: Context, private val listener: Recogn
 
                 // 1. Export JIIX
                 val jiixString = offscreenEditor?.export_(emptyArray(), MimeType.JIIX)
+                val jiixElapsedTime = if (strokeStartTime > 0L) {
+                    System.currentTimeMillis() - strokeStartTime
+                } else {
+                    0L
+                }
+                strokeStartTime = 0L
                 
                 if (jiixString != null) {
                     if (enableEditorLogging) {
@@ -425,6 +438,25 @@ class MyScriptService(private val context: Context, private val listener: Recogn
                         fallbackText.toString().trim()
                     }
 
+                    val ignoredWords = setOf("a", "i", "ms", "mr", "mm")
+                    val currentTop = finalFallback.trim()
+                    val isIgnored = if (currentTop.isNotEmpty()) {
+                        val currentLower = currentTop.lowercase()
+                        if (ignoredWords.contains(currentLower)) {
+                            if (nonIgnorableWordsSinceLast >= 2) {
+                                nonIgnorableWordsSinceLast = 0
+                                false
+                            } else {
+                                true
+                            }
+                        } else {
+                            nonIgnorableWordsSinceLast++
+                            false
+                        }
+                    } else {
+                        false
+                    }
+
                     val resultText = when (decoderMode) {
                         DecoderMode.NGRAM -> {
                             if (sequenceToEvaluate.isNotEmpty()) {
@@ -437,7 +469,7 @@ class MyScriptService(private val context: Context, private val listener: Recogn
                                 finalFallback
                             }
                         }
-                        DecoderMode.LLM -> {
+                        DecoderMode.LLM, DecoderMode.LLM_RAW_TTS -> {
                             val candidateList = sequenceToEvaluate.lastOrNull() ?: emptyList()
                             // Match demo app exactly: trim and filter empty
                             val llmCandidates = candidateList.map { it.trim() }.filter { it.isNotEmpty() }
@@ -668,18 +700,27 @@ class MyScriptService(private val context: Context, private val listener: Recogn
                     }
                     
                     withContext(Dispatchers.Main) {
-                        listener.onTextRecognized(resultText, finalDebugText)
-                        
-                        // Send strokes to visualizer
-                        if (allItems.isNotEmpty()) {
+                        // Send strokes to visualizer first so it is updated before capturing
+                        if (isIgnored) {
+                            listener.onJiixReceived(emptyList())
+                        } else if (allItems.isNotEmpty()) {
                             listener.onJiixReceived(allItems)
                         }
+
+                        listener.onTextRecognized(
+                            text = resultText,
+                            debugText = finalDebugText,
+                            rawText = finalFallback,
+                            llmText = if (decoderMode == DecoderMode.LLM || decoderMode == DecoderMode.LLM_RAW_TTS) resultText else "",
+                            jiixElapsedTime = jiixElapsedTime,
+                            isIgnored = isIgnored
+                        )
                         
                         if (enableEditorLogging) Log.d("Editor Logging", "Result emitted. Clearing engine.")
                         offscreenEditor?.clear()
                     }
 
-                    if (resultText.isNotBlank()) {
+                    if (resultText.isNotBlank() && !isIgnored) {
                         llmContextWords.add(resultText.trim())
                         canUndo = true
                     }

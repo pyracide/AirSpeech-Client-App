@@ -50,7 +50,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     private var offsetY: Float = 0f
 
     // Drawing Mode State
-    var isDrawingMode: Boolean = false
+    var isDrawingMode: Boolean = true
         set(value) {
             field = value
             if (!value) {
@@ -76,9 +76,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         tapCount = 0
     }
     var isTapGesturesEnabled: Boolean = true
+    var isFistClenchClearEnabled: Boolean = true
     private var isTapTriggered = false
     var coordinateScale: Float = 1.0f
-    var sendMode: Int = 0 // 0 = Third Person, 1 = First Person
+    var sendMode: Int = 1 // 0 = Third Person, 1 = First Person
     var isCenterCrop: Boolean = false
     var isDebugOverlayEnabled: Boolean = false
         set(value) {
@@ -90,6 +91,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     interface OnStrokeListener {
         fun onStroke(points: List<MyScriptService.PointData>)
         fun onClear()
+        fun onSend()
         fun onDoublePinch()
         fun onTriplePinch()
         fun onDebugCoords(x: Float, y: Float)
@@ -97,6 +99,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         fun onHandPresence(detected: Boolean)
         fun onAbort()
         fun onDrawingStateChanged(isWriting: Boolean)
+        fun onPinchDebug(scaleDist: Float, pinchDist: Float, ratio: Float) {}
+        fun onFistClenchDebug(isFistClenched: Boolean) {}
     }
 
     init {
@@ -362,6 +366,67 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         val pinchDist = distance(thumbTip, indexTip)
         val ratio = if (scaleDist > 0) pinchDist / scaleDist else 100f // prevent div by zero
         
+        strokeListener?.onPinchDebug(scaleDist, pinchDist, ratio)
+        
+        // Calculate fist clench
+        val indexMCPDist = distance(indexMCP, wrist)
+        val indexTipDist = distance(indexTip, wrist)
+        val middleMCPDist = distance(middleMCP, wrist)
+        val middleTipDist = distance(middleTip, wrist)
+        val ringMCPDist = distance(ringMCP, wrist)
+        val ringTipDist = distance(ringTip, wrist)
+        val pinkyMCPDist = distance(pinkyMCP, wrist)
+        val pinkyTipDist = distance(pinkyTip, wrist)
+        
+        val indexClenched = indexTipDist < indexMCPDist * 1.15f
+        val middleClenched = middleTipDist < middleMCPDist * 1.15f
+        val ringClenched = ringTipDist < ringMCPDist * 1.15f
+        val pinkyClenched = pinkyTipDist < pinkyMCPDist * 1.15f
+        
+        val isFistClenched = indexClenched && middleClenched && ringClenched && pinkyClenched
+        strokeListener?.onFistClenchDebug(isFistClenched)
+
+        // Cooldown: After a clear gesture, keep canvas cleared for 0.5 seconds and block drawing
+        val now = System.currentTimeMillis()
+        if (now - lastClearTime < 500) {
+            if (isWriting) {
+                isWriting = false
+                strokeListener?.onDrawingStateChanged(false)
+            }
+            currentPath = null
+            currentStrokePoints.clear()
+            drawnPaths.clear()
+            val indexX = indexTip.x() * imageWidth * scaleFactor + offsetX
+            val indexY = indexTip.y() * imageHeight * scaleFactor + offsetY
+            strokeListener?.onDebugCoords(indexX, indexY)
+            return
+        }
+        
+        // If fist clench is active, drawing/writing is impossible.
+        if (isFistClenched) {
+            if (isWriting) {
+                isWriting = false
+                strokeListener?.onDrawingStateChanged(false)
+            }
+            currentPath = null
+            currentStrokePoints.clear()
+            
+            // Process fist clench clear gesture if enabled
+            if (isFistClenchClearEnabled) {
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastClearTime > 1000) {
+                    clearDrawing()
+                    strokeListener?.onClear()
+                    lastClearTime = currentTime
+                }
+            }
+            
+            val indexX = indexTip.x() * imageWidth * scaleFactor + offsetX
+            val indexY = indexTip.y() * imageHeight * scaleFactor + offsetY
+            strokeListener?.onDebugCoords(indexX, indexY)
+            return
+        }
+        
         // --- Pinch Detection (The "Pen") ---
         val START_THRESHOLD = 0.20
         val STOP_THRESHOLD = 0.30
@@ -382,8 +447,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                 
                 tapHandler.removeCallbacks(tapRunnable)
                 if (tapCount == 3) {
-                    Log.d("OverlayView", "TRIPLE PINCH")
-                    strokeListener?.onTriplePinch()
+                    if (!isFistClenchClearEnabled) {
+                        Log.d("OverlayView", "TRIPLE PINCH")
+                        strokeListener?.onTriplePinch()
+                    }
                     tapCount = 0
                 } else {
                     tapHandler.postDelayed(tapRunnable, 400)
@@ -441,8 +508,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             currentStrokePoints.add(MyScriptService.PointData(scaledX, scaledY, System.currentTimeMillis()))
         }
         
-        // --- The "Send/Clear" Gesture ---
-        var isClearGesture = false
+        // --- The "Send" Gesture ---
+        var isSendGesture = false
         
         if (sendMode == 0) {
             // Third Person (Current) Mode
@@ -452,7 +519,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             
             val fingersOpen = middleExt && ringExt && pinkyExt
             val thumbIndexApart = ratio > 0.95
-            isClearGesture = fingersOpen && thumbIndexApart && !isWriting
+            isSendGesture = fingersOpen && thumbIndexApart && !isWriting
         } else {
             // First Person Mode: 4 fingers straight
             val indexStraight = isFingerStraight(indexMCP, landmarks[6], indexTip)
@@ -460,16 +527,16 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val ringStraight = isFingerStraight(ringMCP, landmarks[14], ringTip)
             val pinkyStraight = isFingerStraight(pinkyMCP, landmarks[18], pinkyTip)
             
-            isClearGesture = indexStraight && middleStraight && ringStraight && pinkyStraight && !isWriting
+            isSendGesture = indexStraight && middleStraight && ringStraight && pinkyStraight && !isWriting
         }
         
-        if (isClearGesture) {
+        if (isSendGesture) {
              val currentTime = System.currentTimeMillis()
-             // Debounce clear to avoid multiple triggers
+             // Debounce send to avoid multiple triggers
              if (currentTime - lastClearTime > 1000) {
-                 clearDrawing()
-                 strokeListener?.onClear()
-                 lastClearTime = currentTime
+                  clearDrawing()
+                  strokeListener?.onSend()
+                  lastClearTime = currentTime
              }
         }
         

@@ -50,8 +50,11 @@ import com.google.mediapipe.examples.handlandmarker.UdpHapticController
 import com.google.mediapipe.examples.handlandmarker.H264Decoder
 import com.google.mediapipe.examples.handlandmarker.databinding.FragmentCameraBinding
 import com.google.mediapipe.examples.handlandmarker.databinding.InfoBottomSheetBinding
+import android.content.Context
+import android.graphics.Canvas
 import com.google.mediapipe.examples.handlandmarker.myscript.Item
 import com.google.mediapipe.examples.handlandmarker.myscript.MyScriptService
+import com.google.mediapipe.examples.handlandmarker.myscript.StrokeDataUploader
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import java.util.Locale
 import java.util.concurrent.ExecutorService
@@ -86,7 +89,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraFacing = CameraSelector.LENS_FACING_FRONT
     private var isWideAngle = false
-    private var isDrawingMode = false
+    private var isDrawingMode = true
     private var cameraControl: CameraControl? = null
     
     // Blink state to interrupt MediaPipe feed
@@ -130,7 +133,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var ngWeight = 1.0f
     private var isDecoderDebugEnabled = false
     private var isJiixDebugEnabled = false
-    private var decoderMode = MyScriptService.DecoderMode.LLM
+    private var decoderMode = MyScriptService.DecoderMode.LLM_RAW_TTS
     private var llmTimeoutMs = 1000L
     private var llmModelIndex = 0
     private var llmScalingMode = 0
@@ -142,6 +145,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     
     private val isProcessingFrame = java.util.concurrent.atomic.AtomicBoolean(false)
     private val isCopyingFrame = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var strokeStartTime = 0L
     private var bufferWriting: Bitmap? = null
     private var bufferReady: Bitmap? = null
     private var bufferReading: Bitmap? = null
@@ -247,6 +251,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             // Set up the camera and its use cases
             setUpCamera()
         }
+
+        // Trigger upload check for any failed/cached strokes from previous sessions
+        StrokeDataUploader.triggerUploads(requireContext())
         
         // Initialize TTS
         tts = TextToSpeech(context, this)
@@ -301,21 +308,83 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         
         // Initialize MyScript
         myScriptService = MyScriptService(requireContext(), object : MyScriptService.RecognitionListener {
-            override fun onTextRecognized(text: String, debugText: String) {
-                 activity?.runOnUiThread {
-                     fragmentCameraBinding.textRecognitionResult.text = text
-                     if (isDecoderDebugEnabled && debugText.isNotEmpty()) {
-                         fragmentCameraBinding.textNgramDebug.text = debugText
-                         fragmentCameraBinding.textNgramDebug.visibility = View.VISIBLE
-                     } else {
-                         fragmentCameraBinding.textNgramDebug.visibility = View.GONE
-                     }
-                     
-                     // Speak only if drawing mode is active and text is not empty
-                     if (isDrawingMode && text.isNotBlank()) {
-                         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "UtteranceId")
-                     }
-                 }
+            override fun onTextRecognized(text: String, debugText: String, rawText: String, llmText: String, jiixElapsedTime: Long, isIgnored: Boolean) {
+                  activity?.runOnUiThread {
+                       if (isIgnored) {
+                           strokeStartTime = 0L
+                           myScriptService?.strokeStartTime = 0L
+                           return@runOnUiThread
+                       }
+                       val capturedElapsedTimer = jiixElapsedTime
+
+                       val displayText = if (myScriptService?.decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) {
+                           rawText
+                       } else {
+                           text
+                       }
+                       fragmentCameraBinding.textRecognitionResult.text = displayText
+                       fragmentCameraBinding.textTimerScore.text = "Timer: ${capturedElapsedTimer} ms"
+
+                       val timerLabel = "Recognition Latency: ${capturedElapsedTimer} ms"
+                       val finalDebug = if (debugText.isNotEmpty()) {
+                           "$timerLabel\n\n$debugText"
+                       } else {
+                           timerLabel
+                       }
+
+                       if (isDecoderDebugEnabled) {
+                           fragmentCameraBinding.textNgramDebug.text = finalDebug
+                           fragmentCameraBinding.textNgramDebug.visibility = View.VISIBLE
+                       } else {
+                           fragmentCameraBinding.textNgramDebug.visibility = View.GONE
+                       }
+                       
+                       // Speak only if drawing mode is active and text is not empty
+                       if (isDrawingMode) {
+                           val textToSpeak = if (myScriptService?.decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) {
+                               rawText
+                           } else {
+                               text
+                           }
+                           if (textToSpeak.isNotBlank()) {
+                               tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "UtteranceId")
+                           }
+                       }
+
+                       // Capture and upload the inkPreview strip for user testing data collection
+                       if (isSmartGlassesMode && rawText.isNotBlank()) {
+                           val view = fragmentCameraBinding.inkPreview
+                           view.post {
+                               if (view.width > 0 && view.height > 0) {
+                                   try {
+                                       val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                                       val canvas = Canvas(bitmap)
+                                       view.draw(canvas)
+
+                                       val prefs = requireContext().getSharedPreferences("stroke_data_prefs", Context.MODE_PRIVATE)
+                                       val currentImageNum = prefs.getInt("last_image_num", 0) + 1
+                                       prefs.edit().putInt("last_image_num", currentImageNum).apply()
+
+                                       val versionStr = if (currentStreamMode == MODE_CLASSIC) "MINI" else "PRO"
+                                       val sanitizedRaw = sanitizeFilenamePart(rawText)
+                                       val llmPart = if ((myScriptService?.decoderMode == MyScriptService.DecoderMode.LLM || myScriptService?.decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) && llmText.isNotBlank()) {
+                                           "_" + sanitizeFilenamePart(llmText)
+                                       } else {
+                                           ""
+                                       }
+                                       val filename = "${versionStr}_${currentImageNum}_${sanitizedRaw}${llmPart}_${capturedElapsedTimer}.png"
+
+                                       StrokeDataUploader.queueUpload(requireContext(), bitmap, filename)
+                                   } catch (e: Exception) {
+                                       Log.e(TAG, "Error capturing inkPreview or queuing upload", e)
+                                   }
+                               }
+                           }
+                       }
+
+                        strokeStartTime = 0L
+                        myScriptService?.strokeStartTime = 0L
+                  }
             }
             
             override fun onJiixReceived(items: List<Item>) {
@@ -339,13 +408,41 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         
         fragmentCameraBinding.overlay.strokeListener = object : OverlayView.OnStrokeListener {
             override fun onStroke(points: List<MyScriptService.PointData>) {
+                if (strokeStartTime == 0L) {
+                    val now = System.currentTimeMillis()
+                    strokeStartTime = now
+                    myScriptService?.strokeStartTime = now
+                    activity?.runOnUiThread {
+                        fragmentCameraBinding.textTimerScore.text = "Timer: -- ms"
+                    }
+                }
                 myScriptService?.addStroke(points)
             }
             override fun onClear() {
-                // When user clears drawing, trigger recognition commit
+                strokeStartTime = 0L
+                myScriptService?.strokeStartTime = 0L
+                activity?.runOnUiThread {
+                    fragmentCameraBinding.textTimerScore.text = "Timer: -- ms"
+                    fragmentCameraBinding.inkPreview.setStrokes(emptyList())
+                    if (isJiixDebugEnabled) {
+                        fragmentCameraBinding.jiixDebugView.showStrokes(emptyList())
+                    }
+                }
+                myScriptService?.clear()
+            }
+            override fun onSend() {
                 myScriptService?.commitAndClear()
             }
             override fun onDoublePinch() {
+                strokeStartTime = 0L
+                myScriptService?.strokeStartTime = 0L
+                activity?.runOnUiThread {
+                    fragmentCameraBinding.textTimerScore.text = "Timer: -- ms"
+                    fragmentCameraBinding.inkPreview.setStrokes(emptyList())
+                    if (isJiixDebugEnabled) {
+                        fragmentCameraBinding.jiixDebugView.showStrokes(emptyList())
+                    }
+                }
                 // Undo last word from LLM context
                 val didUndo = myScriptService?.undoLastWord() == true
                 if (didUndo) {
@@ -362,6 +459,15 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 }, 100)
             }
             override fun onTriplePinch() {
+                strokeStartTime = 0L
+                myScriptService?.strokeStartTime = 0L
+                activity?.runOnUiThread {
+                    fragmentCameraBinding.textTimerScore.text = "Timer: -- ms"
+                    fragmentCameraBinding.inkPreview.setStrokes(emptyList())
+                    if (isJiixDebugEnabled) {
+                        fragmentCameraBinding.jiixDebugView.showStrokes(emptyList())
+                    }
+                }
                 // Clear MyScript engine buffer
                 myScriptService?.clear()
 
@@ -385,13 +491,48 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             }
             override fun onHandPresence(detected: Boolean) {
                 udpHapticController.onHandPresenceChanged(detected)
+                if (!detected) {
+                    activity?.runOnUiThread {
+                        fragmentCameraBinding.textPinchDebug.text = "Pinch: S=--, P=--, R=--"
+                        fragmentCameraBinding.textFistClenchStatus.text = "Fist Clench: --"
+                    }
+                }
             }
             override fun onAbort() {
+                strokeStartTime = 0L
+                myScriptService?.strokeStartTime = 0L
+                activity?.runOnUiThread {
+                    fragmentCameraBinding.textTimerScore.text = "Timer: -- ms"
+                    fragmentCameraBinding.inkPreview.setStrokes(emptyList())
+                    if (isJiixDebugEnabled) {
+                        fragmentCameraBinding.jiixDebugView.showStrokes(emptyList())
+                    }
+                }
                 // Clear backend silently without committing
                 myScriptService?.clear()
             }
             override fun onDrawingStateChanged(isWriting: Boolean) {
                 udpHapticController.onDrawingStateChanged(isWriting)
+            }
+            override fun onPinchDebug(scaleDist: Float, pinchDist: Float, ratio: Float) {
+                activity?.runOnUiThread {
+                    fragmentCameraBinding.textPinchDebug.text = String.format(
+                        Locale.US,
+                        "Pinch: S=%.1f, P=%.1f, R=%.2f",
+                        scaleDist,
+                        pinchDist,
+                        ratio
+                    )
+                }
+            }
+            override fun onFistClenchDebug(isFistClenched: Boolean) {
+                activity?.runOnUiThread {
+                    if (fragmentCameraBinding.overlay.isFistClenchClearEnabled) {
+                        fragmentCameraBinding.textFistClenchStatus.text = if (isFistClenched) "Fist Clench: ACTIVE" else "Fist Clench: INACTIVE"
+                    } else {
+                        fragmentCameraBinding.textFistClenchStatus.text = "Fist Clench: DISABLED"
+                    }
+                }
             }
         }
 
@@ -451,6 +592,21 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             fragmentCameraBinding.overlay.isDrawingMode = isDrawingMode
             udpHapticController.isDrawingMode = isDrawingMode
         }
+
+        // Initialize drawing mode default state
+        if (isDrawingMode) {
+            fragmentCameraBinding.btnDrawingMode.text = "Draw: ON"
+            fragmentCameraBinding.btnDrawingMode.setBackgroundResource(R.drawable.glass_button_active_bg)
+            fragmentCameraBinding.textRecognitionResult.visibility = View.VISIBLE
+            fragmentCameraBinding.textDebugCoords.visibility = View.GONE
+        } else {
+            fragmentCameraBinding.btnDrawingMode.text = "Draw: OFF"
+            fragmentCameraBinding.btnDrawingMode.setBackgroundResource(R.drawable.glass_button_bg)
+            fragmentCameraBinding.textRecognitionResult.visibility = View.GONE
+            fragmentCameraBinding.textDebugCoords.visibility = if (isDebugOverlaysEnabled) View.VISIBLE else View.GONE
+        }
+        fragmentCameraBinding.overlay.isDrawingMode = isDrawingMode
+        udpHapticController.isDrawingMode = isDrawingMode
 
         fragmentCameraBinding.btnResetLlmContext.setOnClickListener {
             myScriptService?.resetLlmContext()
@@ -1214,13 +1370,14 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                     p0: AdapterView<*>?, p1: View?, p2: Int, p3: Long
                 ) {
                     decoderMode = when (p2) {
-                        0 -> MyScriptService.DecoderMode.LLM
-                        1 -> MyScriptService.DecoderMode.NGRAM
+                        0 -> MyScriptService.DecoderMode.LLM_RAW_TTS
+                        1 -> MyScriptService.DecoderMode.LLM
+                        2 -> MyScriptService.DecoderMode.NGRAM
                         else -> MyScriptService.DecoderMode.NONE
                     }
                     myScriptService?.decoderMode = decoderMode
                     myScriptService?.llmTimeoutMs = llmTimeoutMs
-                    if (decoderMode == MyScriptService.DecoderMode.LLM) {
+                    if (decoderMode == MyScriptService.DecoderMode.LLM || decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) {
                         myScriptService?.preloadLlm()
                     }
                     updateControlsUi()
@@ -1239,7 +1396,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 ) {
                     llmModelIndex = p2
                     myScriptService?.setLlmModelIndex(p2)
-                    if (decoderMode == MyScriptService.DecoderMode.LLM) {
+                    if (decoderMode == MyScriptService.DecoderMode.LLM || decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) {
                         myScriptService?.preloadLlm()
                     }
                     updateControlsUi()
@@ -1282,6 +1439,11 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             fragmentCameraBinding.overlay.isTapGesturesEnabled = isChecked
         }
         
+        bottomSheetBinding!!.fistClenchClearSwitch.isChecked = fragmentCameraBinding.overlay.isFistClenchClearEnabled
+        bottomSheetBinding!!.fistClenchClearSwitch.setOnCheckedChangeListener { _, isChecked ->
+            fragmentCameraBinding.overlay.isFistClenchClearEnabled = isChecked
+        }
+        
         // Coordinate Scale buttons
         bottomSheetBinding!!.textScaleValue.text = String.format(java.util.Locale.US, "%.2f", fragmentCameraBinding.overlay.coordinateScale)
         bottomSheetBinding!!.btnScalePlus.setOnClickListener {
@@ -1305,9 +1467,10 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
 
     private fun getDecoderModeIndex(): Int {
         return when (decoderMode) {
-            MyScriptService.DecoderMode.LLM -> 0
-            MyScriptService.DecoderMode.NGRAM -> 1
-            MyScriptService.DecoderMode.NONE -> 2
+            MyScriptService.DecoderMode.LLM_RAW_TTS -> 0
+            MyScriptService.DecoderMode.LLM -> 1
+            MyScriptService.DecoderMode.NGRAM -> 2
+            MyScriptService.DecoderMode.NONE -> 3
         }
     }
 
@@ -1345,7 +1508,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         val isNgramMode = decoderMode == MyScriptService.DecoderMode.NGRAM
         bottomSheetBinding!!.ngramWeightRow.visibility = if (isNgramMode) View.VISIBLE else View.GONE
 
-        val isLlmMode = decoderMode == MyScriptService.DecoderMode.LLM
+        val isLlmMode = decoderMode == MyScriptService.DecoderMode.LLM || decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS
         bottomSheetBinding!!.llmTimeoutRow.visibility = if (isLlmMode) View.VISIBLE else View.GONE
         bottomSheetBinding!!.llmTimeoutValue.text = String.format(Locale.US, "%.1f", llmTimeoutMs / 1000f)
         bottomSheetBinding!!.llmModelRow.visibility = if (isLlmMode) View.VISIBLE else View.GONE
@@ -1555,7 +1718,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         fragmentCameraBinding.textDebugCoords.visibility = if (isDebugOverlaysEnabled && !isDrawingMode) View.VISIBLE else View.GONE
         fragmentCameraBinding.textConfidenceDebug.visibility = vis
         
-        val isLlmMode = decoderMode == MyScriptService.DecoderMode.LLM
+        val isLlmMode = decoderMode == MyScriptService.DecoderMode.LLM || decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS
         fragmentCameraBinding.textLlmStatus.visibility = if (isDebugOverlaysEnabled && isLlmMode) View.VISIBLE else View.GONE
         
         fragmentCameraBinding.textNgramDebug.visibility = if (isDebugOverlaysEnabled && isDecoderDebugEnabled) View.VISIBLE else View.GONE
@@ -1584,5 +1747,11 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         activity?.runOnUiThread {
             textView.text = String.format(java.util.Locale.US, "%s: %.1f", prefix, fps)
         }
+    }
+
+    private fun sanitizeFilenamePart(part: String): String {
+        return part.trim()
+            .replace("\\s+".toRegex(), "-")
+            .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
     }
 }
