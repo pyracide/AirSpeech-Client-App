@@ -17,7 +17,7 @@
 <resources>
 
     <!-- Base application theme. -->
-    <style name="AppTheme" parent="Theme.MaterialComponents.Light.NoActionBar" >
+    <style name="AppTheme" parent="Theme.MaterialComponents.NoActionBar" >
         <!-- Primary brand color. -->
         <item name="colorPrimary">@color/mp_color_primary</item>
         <item name="colorPrimaryVariant">@color/mp_color_primary_variant</item>
@@ -27,12 +27,28 @@
         <item name="colorSecondaryVariant">@color/mp_color_secondary_variant</item>
         <item name="colorError">@color/mp_color_error</item>
         <!-- Status bar color. -->
-        <item name="android:statusBarColor">?attr/colorPrimary</item>
+        <item name="android:statusBarColor">@color/toolbar_background</item>
         <!-- Customize your theme here. -->
     </style>
 
-    <style name="BottomSheetSpinnerItemStyle" parent="Widget.AppCompat.Light.DropDownItem.Spinner">
+    <style name="BottomSheetSpinnerItemStyle" parent="Widget.AppCompat.DropDownItem.Spinner">
         <item name="android:textSize">@dimen/bottom_sheet_text_size</item>
+        <item name="android:textColor">@color/bottom_sheet_text_color</item>
+    </style>
+
+    <style name="BottomSheetDialogTheme" parent="Theme.Design.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/BottomSheetStyle</item>
+    </style>
+
+    <style name="BottomSheetStyle" parent="Widget.Design.BottomSheet.Modal">
+        <item name="android:background">@android:color/transparent</item>
+    </style>
+
+    <style name="CustomDialogTheme" parent="Theme.MaterialComponents.Dialog.Alert">
+        <item name="backgroundTint">#0F172A</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#94A3B8</item>
+        <item name="colorPrimary">@color/mp_color_primary</item>
     </style>
 
     <style name="AppThemeProgressStyle">

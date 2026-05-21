@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#F20F172A" /> <!-- 95% opacity Slate 900 for a rich dark background -->
+    <corners
+        android:topLeftRadius="28dp"
+        android:topRightRadius="28dp" />
+    <stroke
+        android:width="1.5dp"
+        android:color="#26FFFFFF" /> <!-- Subtle glowing border -->
+</shape>

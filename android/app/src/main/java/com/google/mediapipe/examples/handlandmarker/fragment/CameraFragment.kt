@@ -98,7 +98,11 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var isSmartGlassesFlipped = false
     private var isSmartGlassesMirrored = false
     private var smartGlassesService: SmartGlassesStreamService? = null
-    private var lastSocketUrl = "ws://192.168.1.218:81"
+    private var lastSocketUrl = "ws://192.168.1.65:81"
+    private var defaultHomeMjpeg = "ws://192.168.1.65:81"
+    private var defaultHomeRtsp = "rtsp://192.168.1.251:554/stream"
+    private var defaultHotspotMjpeg = "ws://192.168.1.65:81"
+    private var defaultHotspotRtsp = "rtsp://10.155.72.108:554/stream"
     private var h264Decoder: H264Decoder? = null
     
     // RTSP Player
@@ -130,7 +134,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var llmTimeoutMs = 1000L
     private var llmModelIndex = 0
     private var llmScalingMode = 0
-    private var scraperTargetHeight = 480
+    private var scraperTargetHeight = 420
+    private var isDebugOverlaysEnabled = false
     
     private val camFpsQueue = java.util.ArrayDeque<Long>()
     private val mpFpsQueue = java.util.ArrayDeque<Long>()
@@ -248,12 +253,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
 
         // Create the HandLandmarkerHelper that will handle the inference
         backgroundExecutor.execute {
-            // Check if delegate was set, otherwise default to GPU (1)
-            val currentDelegate = if (viewModel.currentDelegate == HandLandmarkerHelper.DELEGATE_CPU) {
-                 HandLandmarkerHelper.DELEGATE_GPU
-            } else {
-                 viewModel.currentDelegate
-            }
+            // Force delegate to GPU (1)
+            val currentDelegate = HandLandmarkerHelper.DELEGATE_GPU
             viewModel.setDelegate(currentDelegate) // Update VM
 
             handLandmarkerHelper = HandLandmarkerHelper(
@@ -414,40 +415,22 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 fragmentCameraBinding.smartGlassesRtspContainer.scaleX = scale
                 fragmentCameraBinding.smartGlassesRtspView.scaleX = scale
                 fragmentCameraBinding.smartGlassesRtspView.rotationY = rotation
+
+                fragmentCameraBinding.btnMirrorCamera.setBackgroundResource(
+                    if (isSmartGlassesMirrored) R.drawable.glass_button_active_bg else R.drawable.glass_button_bg
+                )
             }
         }
 
-        fragmentCameraBinding.btnFlipCamera.setOnClickListener {
-            if (isSmartGlassesMode) {
-                isSmartGlassesFlipped = !isSmartGlassesFlipped
-                val rotation = if (isSmartGlassesFlipped) 180f else 0f
-                val scale = if (isSmartGlassesFlipped) -1f else 1f
-                
-                fragmentCameraBinding.smartGlassesView.rotationX = rotation
-                fragmentCameraBinding.smartGlassesH264View.rotationX = rotation
-                
-                // RTSP SurfaceView: Apply BOTH scale and rotation to the container and the view
-                fragmentCameraBinding.smartGlassesRtspContainer.scaleY = scale
-                fragmentCameraBinding.smartGlassesRtspView.scaleY = scale
-                fragmentCameraBinding.smartGlassesRtspView.rotationX = rotation
-                return@setOnClickListener
-            }
-            
-            cameraFacing = if (cameraFacing == CameraSelector.LENS_FACING_FRONT) {
-                CameraSelector.LENS_FACING_BACK
-            } else {
-                CameraSelector.LENS_FACING_FRONT
-            }
-            updateWideAngleButtonVisibility()
-            bindCameraUseCases()
-        }
 
         fragmentCameraBinding.btnWideAngle.setOnClickListener {
             isWideAngle = !isWideAngle
             if (isWideAngle) {
                 fragmentCameraBinding.btnWideAngle.text = "Normal"
+                fragmentCameraBinding.btnWideAngle.setBackgroundResource(R.drawable.glass_button_active_bg)
             } else {
                 fragmentCameraBinding.btnWideAngle.text = "Wide"
+                fragmentCameraBinding.btnWideAngle.setBackgroundResource(R.drawable.glass_button_bg)
             }
             setZoom()
         }
@@ -456,12 +439,14 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             isDrawingMode = !isDrawingMode
             if (isDrawingMode) {
                 fragmentCameraBinding.btnDrawingMode.text = "Draw: ON"
+                fragmentCameraBinding.btnDrawingMode.setBackgroundResource(R.drawable.glass_button_active_bg)
                 fragmentCameraBinding.textRecognitionResult.visibility = View.VISIBLE
                 fragmentCameraBinding.textDebugCoords.visibility = View.GONE
             } else {
                 fragmentCameraBinding.btnDrawingMode.text = "Draw: OFF"
+                fragmentCameraBinding.btnDrawingMode.setBackgroundResource(R.drawable.glass_button_bg)
                 fragmentCameraBinding.textRecognitionResult.visibility = View.GONE
-                fragmentCameraBinding.textDebugCoords.visibility = View.VISIBLE
+                fragmentCameraBinding.textDebugCoords.visibility = if (isDebugOverlaysEnabled) View.VISIBLE else View.GONE
             }
             fragmentCameraBinding.overlay.isDrawingMode = isDrawingMode
             udpHapticController.isDrawingMode = isDrawingMode
@@ -472,21 +457,6 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             Toast.makeText(requireContext(), "LLM context reset", Toast.LENGTH_SHORT).show()
         }
         
-        fragmentCameraBinding.btnBlink.setOnClickListener {
-            // Cut feed to MediaPipe by sending BLACK frames
-            isBlinking = true
-            fragmentCameraBinding.viewFinder.visibility = View.INVISIBLE
-            fragmentCameraBinding.smartGlassesView.visibility = View.INVISIBLE // Also blink SG view if active
-            
-            fragmentCameraBinding.viewFinder.postDelayed({
-                isBlinking = false
-                if (isSmartGlassesMode) {
-                    fragmentCameraBinding.smartGlassesView.visibility = View.VISIBLE
-                } else {
-                    fragmentCameraBinding.viewFinder.visibility = View.VISIBLE
-                }
-            }, 100)
-        }
         
         fragmentCameraBinding.btnSettings.setOnClickListener {
             showSettingsDialog()
@@ -495,6 +465,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         fragmentCameraBinding.btnSmartGlasses.setOnClickListener {
             toggleSmartGlassesMode()
         }
+
+        // Initialize visibility states for debug overlays
+        updateDebugOverlaysVisibility()
     }
 
     private fun startPacerIfNeeded() {
@@ -545,63 +518,185 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private fun toggleSmartGlassesMode() {
         if (!isSmartGlassesMode) {
             // Enable Smart Glasses Mode
+            val density = resources.displayMetrics.density
             val layout = android.widget.LinearLayout(requireContext()).apply { 
                 orientation = android.widget.LinearLayout.VERTICAL
-                setPadding(50, 40, 50, 10) 
+                val padding = (24 * density).toInt()
+                setPadding(padding, padding, padding, padding) 
             }
             
-            val input = android.widget.EditText(requireContext())
-            input.setText(lastSocketUrl)
+            // Environment Selector Label
+            val lblEnv = android.widget.TextView(requireContext()).apply {
+                text = "Environment"
+                setTextColor(android.graphics.Color.parseColor("#94A3B8")) // Slate-400
+                textSize = 14f
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (8 * density).toInt()
+                }
+            }
+            layout.addView(lblEnv)
+            
+            // Environment RadioGroup (Horizontal)
+            val rgEnv = android.widget.RadioGroup(requireContext()).apply {
+                orientation = android.widget.RadioGroup.HORIZONTAL
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (20 * density).toInt()
+                }
+            }
+            
+            val rbHome = android.widget.RadioButton(requireContext()).apply {
+                text = "Home"
+                id = android.view.View.generateViewId()
+                setTextColor(android.graphics.Color.WHITE)
+                buttonTintList = android.content.res.ColorStateList.valueOf(ContextCompat.getColor(context, R.color.mp_color_primary))
+                layoutParams = android.widget.RadioGroup.LayoutParams(
+                    0,
+                    android.widget.RadioGroup.LayoutParams.WRAP_CONTENT,
+                    1.0f
+                )
+            }
+            
+            val rbHotspot = android.widget.RadioButton(requireContext()).apply {
+                text = "Hotspot"
+                id = android.view.View.generateViewId()
+                setTextColor(android.graphics.Color.WHITE)
+                buttonTintList = android.content.res.ColorStateList.valueOf(ContextCompat.getColor(context, R.color.mp_color_primary))
+                layoutParams = android.widget.RadioGroup.LayoutParams(
+                    0,
+                    android.widget.RadioGroup.LayoutParams.WRAP_CONTENT,
+                    1.0f
+                )
+            }
+            rgEnv.addView(rbHome)
+            rgEnv.addView(rbHotspot)
+            layout.addView(rgEnv)
+            
+            // Stream Mode Label
+            val lblStream = android.widget.TextView(requireContext()).apply {
+                text = "Stream Mode"
+                setTextColor(android.graphics.Color.parseColor("#94A3B8")) // Slate-400
+                textSize = 14f
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (8 * density).toInt()
+                }
+            }
+            layout.addView(lblStream)
             
             val radioGroup = android.widget.RadioGroup(requireContext()).apply {
                 orientation = android.widget.RadioGroup.VERTICAL
-                setPadding(0, 20, 0, 0)
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (20 * density).toInt()
+                }
             }
             
             val rbClassic = android.widget.RadioButton(requireContext()).apply {
-                text = "Classic (MJPEG)"
+                text = "Mini (MJPEG)"
                 id = android.view.View.generateViewId()
+                setTextColor(android.graphics.Color.WHITE)
+                buttonTintList = android.content.res.ColorStateList.valueOf(ContextCompat.getColor(context, R.color.mp_color_primary))
             }
             val rbH264Classic = android.widget.RadioButton(requireContext()).apply {
                 text = "H.264 Classic (NAL)"
                 id = android.view.View.generateViewId()
+                setTextColor(android.graphics.Color.WHITE)
+                buttonTintList = android.content.res.ColorStateList.valueOf(ContextCompat.getColor(context, R.color.mp_color_primary))
             }
             val rbRtsp = android.widget.RadioButton(requireContext()).apply {
-                text = "H.264 RTSP (UDP)"
+                text = "Pro (RTSP)"
                 id = android.view.View.generateViewId()
+                setTextColor(android.graphics.Color.WHITE)
+                buttonTintList = android.content.res.ColorStateList.valueOf(ContextCompat.getColor(context, R.color.mp_color_primary))
             }
             
             radioGroup.addView(rbClassic)
-            radioGroup.addView(rbH264Classic)
+            // rbH264Classic is hidden from the UI but remains defined to avoid breaking logic
             radioGroup.addView(rbRtsp)
+            layout.addView(radioGroup)
             
-            // Default selection based on current/last state
-            when(currentStreamMode) {
-                MODE_CLASSIC -> rbClassic.isChecked = true
-                MODE_H264_CLASSIC -> rbH264Classic.isChecked = true
-                MODE_H264_RTSP -> rbRtsp.isChecked = true
+            // Connection URL Label
+            val lblUrl = android.widget.TextView(requireContext()).apply {
+                text = "Connection Address"
+                setTextColor(android.graphics.Color.parseColor("#94A3B8")) // Slate-400
+                textSize = 14f
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    bottomMargin = (8 * density).toInt()
+                }
             }
+            layout.addView(lblUrl)
             
-            radioGroup.setOnCheckedChangeListener { _, checkedId ->
-                val ip = lastSocketUrl.substringAfter("//").substringBefore(":")
-                when(checkedId) {
-                    rbClassic.id -> {
-                        input.setText("ws://$ip:81")
-                    }
-                    rbH264Classic.id -> {
-                        input.setText("ws://$ip:81")
-                    }
-                    rbRtsp.id -> {
-                        input.setText("rtsp://192.168.1.251:554/stream")
-                    }
+            val input = android.widget.EditText(requireContext()).apply {
+                setTextColor(android.graphics.Color.WHITE)
+                setHintTextColor(android.graphics.Color.parseColor("#94A3B8"))
+                val padH = (16 * density).toInt()
+                val padV = (12 * density).toInt()
+                setPadding(padH, padV, padH, padV)
+                background = ContextCompat.getDrawable(context, R.drawable.glass_button_bg)
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            layout.addView(input)
+            
+            // Auto-detect environment based on lastSocketUrl
+            if (lastSocketUrl == defaultHomeRtsp) {
+                rbHome.isChecked = true
+                rbRtsp.isChecked = true
+            } else if (lastSocketUrl == defaultHotspotRtsp) {
+                rbHotspot.isChecked = true
+                rbRtsp.isChecked = true
+            } else if (lastSocketUrl == defaultHomeMjpeg) {
+                rbHome.isChecked = true
+                rbClassic.isChecked = true
+            } else if (lastSocketUrl == defaultHotspotMjpeg) {
+                rbHotspot.isChecked = true
+                rbClassic.isChecked = true
+            } else {
+                // Default fallback
+                rbHome.isChecked = true
+                when(currentStreamMode) {
+                    MODE_CLASSIC -> rbClassic.isChecked = true
+                    MODE_H264_CLASSIC -> rbClassic.isChecked = true
+                    MODE_H264_RTSP -> rbRtsp.isChecked = true
                 }
             }
             
-            layout.addView(input)
-            layout.addView(radioGroup)
+            // Initial input value
+            input.setText(lastSocketUrl)
             
-            android.app.AlertDialog.Builder(requireContext())
-                .setTitle("Connect to Smart Glasses")
+            // Logic to update default url based on env & stream selections
+            fun updateDefaultUrl() {
+                val isHomeSelected = rgEnv.checkedRadioButtonId == rbHome.id
+                val isMjpegSelected = radioGroup.checkedRadioButtonId == rbClassic.id
+                
+                val defaultUrl = if (isHomeSelected) {
+                    if (isMjpegSelected) defaultHomeMjpeg else defaultHomeRtsp
+                } else {
+                    if (isMjpegSelected) defaultHotspotMjpeg else defaultHotspotRtsp
+                }
+                input.setText(defaultUrl)
+            }
+            
+            rgEnv.setOnCheckedChangeListener { _, _ -> updateDefaultUrl() }
+            radioGroup.setOnCheckedChangeListener { _, _ -> updateDefaultUrl() }
+            
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext(), R.style.CustomDialogTheme)
+                .setTitle("Connect to AirSpeech Wearable")
                 .setView(layout)
                 .setPositiveButton("Connect") { _, _ ->
                     val url = input.text.toString()
@@ -921,7 +1016,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     
     private fun showSettingsDialog() {
         if (settingsDialog == null) {
-            settingsDialog = BottomSheetDialog(requireContext())
+            settingsDialog = BottomSheetDialog(requireContext(), R.style.BottomSheetDialogTheme)
             bottomSheetBinding = InfoBottomSheetBinding.inflate(layoutInflater)
             settingsDialog?.setContentView(bottomSheetBinding!!.root)
             initBottomSheetControls()
@@ -1081,6 +1176,12 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             }
         }
         
+        bottomSheetBinding!!.debugOverlaysSwitch.isChecked = isDebugOverlaysEnabled
+        bottomSheetBinding!!.debugOverlaysSwitch.setOnCheckedChangeListener { _, isChecked ->
+            isDebugOverlaysEnabled = isChecked
+            updateDebugOverlaysVisibility()
+        }
+
         bottomSheetBinding!!.ngramDebugSwitch.setOnCheckedChangeListener { _, isChecked ->
             isDecoderDebugEnabled = isChecked
             myScriptService?.setDebugMode(isChecked)
@@ -1165,45 +1266,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 }
             }
 
-        // When clicked, change the underlying hardware used for inference.
-        // Current options are CPU and GPU
-        bottomSheetBinding!!.spinnerDelegate.setSelection(
-            viewModel.currentDelegate, false
-        )
-        bottomSheetBinding!!.spinnerDelegate.onItemSelectedListener =
-            object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(
-                    p0: AdapterView<*>?, p1: View?, p2: Int, p3: Long
-                ) {
-                    try {
-                        handLandmarkerHelper.currentDelegate = p2
-                        updateControlsUi()
-                    } catch(e: UninitializedPropertyAccessException) {
-                        Log.e(TAG, "HandLandmarkerHelper has not been initialized yet.")
-                    }
-                }
 
-                override fun onNothingSelected(p0: AdapterView<*>?) {
-                    /* no op */
-                }
-            }
-            
-        // Scraper resolution spinner
-        val resOptions = listOf(360, 480, 540, 720, 1080)
-        val currentResIndex = resOptions.indexOf(scraperTargetHeight).coerceAtLeast(0)
-        bottomSheetBinding!!.spinnerScraperRes.setSelection(currentResIndex, false)
-        bottomSheetBinding!!.spinnerScraperRes.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val newHeight = resOptions[position]
-                if (newHeight != scraperTargetHeight) {
-                    scraperTargetHeight = newHeight
-                    if (isSmartGlassesMode && currentStreamMode == MODE_H264_RTSP) {
-                        reinitScraperBitmaps()
-                    }
-                }
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
         
         bottomSheetBinding!!.jitterBufferSwitch.setOnCheckedChangeListener { _, isChecked ->
             isJitterBufferEnabled = isChecked
@@ -1476,14 +1539,36 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         activity?.runOnUiThread {
             Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
             if (errorCode == HandLandmarkerHelper.GPU_ERROR) {
-                // If dialog is open, update spinner
-                if (settingsDialog?.isShowing == true && bottomSheetBinding != null) {
-                    bottomSheetBinding!!.spinnerDelegate.setSelection(
-                        HandLandmarkerHelper.DELEGATE_CPU, false
-                    )
+                // Fallback to CPU delegate directly
+                viewModel.setDelegate(HandLandmarkerHelper.DELEGATE_CPU)
+                if (::handLandmarkerHelper.isInitialized) {
+                    handLandmarkerHelper.currentDelegate = HandLandmarkerHelper.DELEGATE_CPU
                 }
+                updateControlsUi()
             }
         }
+    }
+
+    private fun updateDebugOverlaysVisibility() {
+        val vis = if (isDebugOverlaysEnabled) View.VISIBLE else View.GONE
+        
+        fragmentCameraBinding.textDebugCoords.visibility = if (isDebugOverlaysEnabled && !isDrawingMode) View.VISIBLE else View.GONE
+        fragmentCameraBinding.textConfidenceDebug.visibility = vis
+        
+        val isLlmMode = decoderMode == MyScriptService.DecoderMode.LLM
+        fragmentCameraBinding.textLlmStatus.visibility = if (isDebugOverlaysEnabled && isLlmMode) View.VISIBLE else View.GONE
+        
+        fragmentCameraBinding.textNgramDebug.visibility = if (isDebugOverlaysEnabled && isDecoderDebugEnabled) View.VISIBLE else View.GONE
+        
+        if (!isDebugOverlaysEnabled) {
+            fragmentCameraBinding.jiixDebugView.visibility = View.GONE
+            fragmentCameraBinding.jiixDebugView.dismiss()
+        } else if (isJiixDebugEnabled) {
+            fragmentCameraBinding.jiixDebugView.visibility = View.VISIBLE
+        }
+        
+        fragmentCameraBinding.layoutDebugInfo.visibility = vis
+        fragmentCameraBinding.overlay.isDebugOverlayEnabled = isDebugOverlaysEnabled
     }
 
     private fun updateFpsCounter(queue: java.util.ArrayDeque<Long>, textView: android.widget.TextView, prefix: String) {

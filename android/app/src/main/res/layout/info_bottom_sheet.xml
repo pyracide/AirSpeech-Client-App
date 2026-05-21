@@ -19,7 +19,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_gravity="center_horizontal"
-    android:background="@color/bottom_sheet_background"
+    android:background="@drawable/bottom_sheet_bg"
     android:gravity="center_horizontal"
     android:orientation="vertical"
     android:padding="@dimen/bottom_sheet_padding"
@@ -32,18 +32,42 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- Chevron indicating that the bottom sheet is expandable -->
+        <!-- Drag pill indicating that the bottom sheet is expandable -->
         <RelativeLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:paddingBottom="8dp">
 
-            <ImageView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+            <View
+                android:layout_width="48dp"
+                android:layout_height="4dp"
                 android:layout_centerHorizontal="true"
                 android:layout_centerVertical="true"
-                android:contentDescription="@string/alt_bottom_sheet_chevron"
-                android:src="@drawable/icn_chevron_up" />
+                android:background="@drawable/drag_pill" />
+        </RelativeLayout>
+
+        <!-- Master Debug Overlays switch -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/bottom_sheet_default_row_margin">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:text="Debug Overlays"
+                android:textColor="@color/bottom_sheet_text_color"
+                android:textSize="@dimen/bottom_sheet_text_size" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/debug_overlays_switch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentRight="true"
+                android:layout_centerVertical="true"
+                android:checked="false" />
         </RelativeLayout>
 
         <!-- Inference time row -->
@@ -101,6 +125,9 @@
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
                     android:contentDescription="@string/alt_bottom_sheet_threshold_button_minus"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_minus" />
 
                 <TextView
@@ -119,6 +146,9 @@
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
                     android:contentDescription="@string/alt_bottom_sheet_threshold_button_plus"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_plus" />
             </LinearLayout>
         </RelativeLayout>
@@ -150,6 +180,9 @@
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
                     android:contentDescription="@string/alt_bottom_sheet_threshold_button_minus"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_minus" />
 
                 <TextView
@@ -168,6 +201,9 @@
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
                     android:contentDescription="@string/alt_bottom_sheet_threshold_button_plus"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_plus" />
             </LinearLayout>
         </RelativeLayout>
@@ -199,6 +235,9 @@
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
                     android:contentDescription="@string/alt_bottom_sheet_threshold_button_minus"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_minus" />
 
                 <TextView
@@ -217,6 +256,9 @@
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
                     android:contentDescription="@string/alt_bottom_sheet_threshold_button_plus"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_plus" />
             </LinearLayout>
         </RelativeLayout>
@@ -249,6 +291,9 @@
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
                     android:contentDescription="@string/alt_bottom_sheet_max_results_button_minus"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_minus" />
 
                 <TextView
@@ -267,6 +312,9 @@
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
                     android:contentDescription="@string/alt_bottom_sheet_max_results_button_plus"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_plus" />
             </LinearLayout>
         </RelativeLayout>
@@ -350,6 +398,9 @@
                     android:id="@+id/ngram_weight_minus"
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_minus" />
 
                 <TextView
@@ -367,6 +418,9 @@
                     android:id="@+id/ngram_weight_plus"
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_plus" />
             </LinearLayout>
         </RelativeLayout>
@@ -399,6 +453,9 @@
                     android:id="@+id/llm_timeout_minus"
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_minus" />
 
                 <TextView
@@ -416,6 +473,9 @@
                     android:id="@+id/llm_timeout_plus"
                     android:layout_width="@dimen/bottom_sheet_control_btn_size"
                     android:layout_height="@dimen/bottom_sheet_control_btn_size"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
                     android:src="@drawable/ic_plus" />
             </LinearLayout>
         </RelativeLayout>
@@ -519,7 +579,8 @@
         <RelativeLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/bottom_sheet_default_row_margin">
+            android:layout_marginTop="@dimen/bottom_sheet_default_row_margin"
+            android:visibility="gone">
 
             <TextView
                 android:layout_width="wrap_content"
@@ -545,7 +606,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="@dimen/bottom_sheet_default_row_margin"
-            android:layout_marginBottom="24dp">
+            android:layout_marginBottom="24dp"
+            android:visibility="gone">
 
             <TextView
                 android:layout_width="wrap_content"
@@ -588,14 +650,14 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
-                <androidx.appcompat.widget.AppCompatButton
+                <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btn_scale_minus"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:text="-"
-                    android:textColor="@color/bottom_sheet_text_color"
-                    android:textSize="20sp"
-                    android:background="?attr/selectableItemBackground" />
+                    android:layout_width="@dimen/bottom_sheet_control_btn_size"
+                    android:layout_height="@dimen/bottom_sheet_control_btn_size"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
+                    android:src="@drawable/ic_minus" />
 
                 <TextView
                     android:id="@+id/text_scale_value"
@@ -607,14 +669,14 @@
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
-                <androidx.appcompat.widget.AppCompatButton
+                <androidx.appcompat.widget.AppCompatImageButton
                     android:id="@+id/btn_scale_plus"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:text="+"
-                    android:textColor="@color/bottom_sheet_text_color"
-                    android:textSize="20sp"
-                    android:background="?attr/selectableItemBackground" />
+                    android:layout_width="@dimen/bottom_sheet_control_btn_size"
+                    android:layout_height="@dimen/bottom_sheet_control_btn_size"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
+                    android:src="@drawable/ic_plus" />
             </LinearLayout>
         </RelativeLayout>
 
