@@ -33,3 +33,6 @@ google-services.json
 *.hprof
 subtitle_dataset.txt
 *.gguf
+android/app/src/main/cpp/llama.cpp/
+llm.bin
+*.bin
