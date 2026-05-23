@@ -81,6 +81,7 @@
 
     <string name="label_jitter_buffer">Smooth Motion (Jitter Buffer)</string>
     <string name="label_tap_gestures">Tap Gestures</string>
+    <string name="label_double_pinch_undo">Double Pinch Undo</string>
     <string name="label_coord_scale">Coordinate Scale</string>
     <string name="label_send_mode">Send Mode</string>
     <string-array name="send_mode_titles">

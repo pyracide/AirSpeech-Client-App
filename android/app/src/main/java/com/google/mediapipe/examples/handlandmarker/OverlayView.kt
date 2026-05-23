@@ -76,10 +76,15 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         tapCount = 0
     }
     var isTapGesturesEnabled: Boolean = true
+    var isDoublePinchUndoEnabled: Boolean = false
     var isFistClenchClearEnabled: Boolean = true
     private var isTapTriggered = false
+    private var sendPoseStartTime: Long = 0L
+    private var handLostTime = 0L
     var coordinateScale: Float = 1.0f
     var sendMode: Int = 1 // 0 = Third Person, 1 = First Person
+    var isMjpegMode: Boolean = false
+    var isRtspMode: Boolean = false
     var isCenterCrop: Boolean = false
     var isDebugOverlayEnabled: Boolean = false
         set(value) {
@@ -121,6 +126,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         currentPath = null
         isWriting = false
         currentStrokePoints.clear()
+        handLostTime = 0L
         Log.d("OverlayView", "CLEAR")
     }
 
@@ -128,6 +134,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         results = null
         isTapTriggered = false
         isWriting = false
+        handLostTime = 0L
         invalidate()
     }
 
@@ -283,6 +290,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         offsetY = (height - imageHeight * scaleFactor) / 2f
 
         if (handLandmarkerResults.landmarks().isNotEmpty()) {
+            handLostTime = 0L
             strokeListener?.onHandPresence(true)
             val firstHand = handLandmarkerResults.landmarks().first()
             
@@ -293,24 +301,45 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val centerX = (j5.x() + j9.x() + j13.x()) / 3f
             val centerY = (j5.y() + j9.y() + j13.y()) / 3f
             
-            val distToEdgeX = minOf(centerX, 1f - centerX)
-            val distToEdgeY = minOf(centerY, 1f - centerY)
+            val distToLeft = centerX
+            val distToRight = 1f - centerX
+            val distToTop = centerY
+            val distToBottom = 1f - centerY
             
-            // Map X distance to equivalent Y distance scales to use a single max zone
-            // X Zone 4: < 0.08, Zone 3: < 0.16, Zone 2: < 0.24
-            // Y Zone 4: < 0.10, Zone 3: < 0.20, Zone 2: < 0.30
-            val zoneX = when {
-                distToEdgeX < 0.08f -> 4
-                distToEdgeX < 0.16f -> 3
-                distToEdgeX < 0.24f -> 2
+            // X Proximity Zone thresholds:
+            // Left: Zone 4: < 0.12f, Zone 3: < 0.24f, Zone 2: < 0.36f
+            // Right (original): Zone 4: < 0.08f, Zone 3: < 0.16f, Zone 2: < 0.24f
+            val zoneLeft = when {
+                distToLeft < 0.12f -> 4
+                distToLeft < 0.24f -> 3
+                distToLeft < 0.36f -> 2
                 else -> 1
             }
-            val zoneY = when {
-                distToEdgeY < 0.10f -> 4
-                distToEdgeY < 0.20f -> 3
-                distToEdgeY < 0.30f -> 2
+            val zoneRight = when {
+                distToRight < 0.08f -> 4
+                distToRight < 0.16f -> 3
+                distToRight < 0.24f -> 2
                 else -> 1
             }
+            val zoneX = maxOf(zoneLeft, zoneRight)
+
+            // Y Proximity Zone thresholds:
+            // Top (original): Zone 4: < 0.10f, Zone 3: < 0.20f, Zone 2: < 0.30f
+            // Bottom: Zone 4: < 0.20f, Zone 3: < 0.30f, Zone 2: < 0.40f
+            val zoneTop = when {
+                distToTop < 0.10f -> 4
+                distToTop < 0.20f -> 3
+                distToTop < 0.30f -> 2
+                else -> 1
+            }
+            val zoneBottom = when {
+                distToBottom < 0.30f -> 4
+                distToBottom < 0.40f -> 3
+                distToBottom < 0.45f -> 2
+                else -> 1
+            }
+            val zoneY = maxOf(zoneTop, zoneBottom)
+            
             val zone = maxOf(zoneX, zoneY)
             val effectiveZone = if (isDrawingMode && !isWriting) 1 else zone
             strokeListener?.onZoneChanged(effectiveZone)
@@ -331,17 +360,25 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         } else {
             strokeListener?.onHandPresence(false)
             if (isWriting || drawnPaths.isNotEmpty() || currentPath != null) {
-                if (isWriting) {
-                    isWriting = false
-                    strokeListener?.onDrawingStateChanged(false)
-                } else {
-                    isWriting = false
+                if (handLostTime == 0L) {
+                    handLostTime = System.currentTimeMillis()
                 }
-                currentPath = null
-                drawnPaths.clear()
-                currentStrokePoints.clear()
-                invalidate()
-                strokeListener?.onAbort()
+                if (System.currentTimeMillis() - handLostTime >= 5000) {
+                    if (isWriting) {
+                        isWriting = false
+                        strokeListener?.onDrawingStateChanged(false)
+                    } else {
+                        isWriting = false
+                    }
+                    currentPath = null
+                    drawnPaths.clear()
+                    currentStrokePoints.clear()
+                    invalidate()
+                    strokeListener?.onAbort()
+                    handLostTime = 0L
+                }
+            } else {
+                handLostTime = 0L
             }
         }
 
@@ -426,9 +463,21 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         }
         
         // --- Pinch Detection (The "Pen") ---
-        val START_THRESHOLD = 0.20
-        val STOP_THRESHOLD = 0.30
-        val STOP_THRESHOLD_TAP = 0.26
+        val START_THRESHOLD = when {
+            isRtspMode -> START_THRESHOLD_RTSP
+            isMjpegMode -> START_THRESHOLD_MJPEG
+            else -> START_THRESHOLD_DEFAULT
+        }
+        val STOP_THRESHOLD = when {
+            isRtspMode -> STOP_THRESHOLD_RTSP
+            isMjpegMode -> STOP_THRESHOLD_MJPEG
+            else -> STOP_THRESHOLD_DEFAULT
+        }
+        val STOP_THRESHOLD_TAP = when {
+            isRtspMode -> STOP_THRESHOLD_TAP_RTSP
+            isMjpegMode -> STOP_THRESHOLD_TAP_MJPEG
+            else -> STOP_THRESHOLD_TAP_DEFAULT
+        }
         
         // --- Tap Gesture Detection (Double/Triple Pinch) ---
         // Use a separate release threshold so tap sensitivity can be tuned independently of pen-up.
@@ -458,6 +507,44 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             }
         }
 
+        // --- Send Pose Check for Debounce ---
+        val isSendPose = if (ratio <= STOP_THRESHOLD) {
+            false
+        } else if (sendMode == 0) {
+            // Third Person (Current) Mode
+            val middleExt = distance(middleTip, wrist) > distance(middleMCP, wrist) * 0.85f
+            val ringExt = distance(ringTip, wrist) > distance(ringMCP, wrist) * 0.85f
+            val pinkyExt = distance(pinkyTip, wrist) > distance(pinkyMCP, wrist) * 0.85f
+            val fingersOpen = middleExt && ringExt && pinkyExt
+            val thumbIndexApart = ratio > 0.95
+            fingersOpen && thumbIndexApart
+        } else {
+            // First Person Mode: 4 fingers straight + total straightness check
+            val indexCos = getFingerCosine(indexMCP, landmarks[6], indexTip)
+            val middleCos = getFingerCosine(middleMCP, landmarks[10], middleTip)
+            val ringCos = getFingerCosine(ringMCP, landmarks[14], ringTip)
+            val pinkyCos = getFingerCosine(pinkyMCP, landmarks[18], pinkyTip)
+
+            val indexStraight = indexCos > FINGER_STRAIGHTNESS_THRESHOLD
+            val middleStraight = middleCos > FINGER_STRAIGHTNESS_THRESHOLD
+            val ringStraight = ringCos > FINGER_STRAIGHTNESS_THRESHOLD
+            val pinkyStraight = pinkyCos > FINGER_STRAIGHTNESS_THRESHOLD
+
+            val totalStraightness = indexCos + middleCos + ringCos + pinkyCos
+
+            indexStraight && middleStraight && ringStraight && pinkyStraight && totalStraightness > TOTAL_STRAIGHTNESS_THRESHOLD
+        }
+
+        if (isSendPose) {
+            if (sendPoseStartTime == 0L) {
+                sendPoseStartTime = System.currentTimeMillis()
+            }
+        } else {
+            sendPoseStartTime = 0L
+        }
+
+        val sendPoseAchieved = isSendPose && sendPoseStartTime != 0L && (System.currentTimeMillis() - sendPoseStartTime >= 100)
+
         // --- Pinch Detection (The "Pen" with Hysteresis) ---
         var justStarted = false
         if (!isWriting && ratio < START_THRESHOLD) {
@@ -478,7 +565,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val scaledX = (avgX * imageWidth * scaleFactor) * coordinateScale + offsetX
             val scaledY = (avgY * imageHeight * scaleFactor) * coordinateScale + offsetY
             currentStrokePoints.add(MyScriptService.PointData(scaledX, scaledY, System.currentTimeMillis()))
-         } else if (isWriting && ratio > STOP_THRESHOLD) {
+         } else if (isWriting && ratio > STOP_THRESHOLD && (!isSendPose || sendPoseAchieved)) {
              isWriting = false
              strokeListener?.onDrawingStateChanged(false)
              Log.d("OverlayView", "UP")
@@ -493,7 +580,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             }
         }
         
-        if (isWriting && !justStarted) {
+        if (isWriting && !justStarted && !sendPoseAchieved) {
             val avgX = (indexTip.x() + thumbTip.x()) / 2f
             val avgY = (indexTip.y() + thumbTip.y()) / 2f
             
@@ -507,34 +594,22 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         }
         
         // --- The "Send" Gesture ---
-        var isSendGesture = false
-        
-        if (sendMode == 0) {
-            // Third Person (Current) Mode
-            val middleExt = distance(middleTip, wrist) > distance(middleMCP, wrist) * 0.85f
-            val ringExt = distance(ringTip, wrist) > distance(ringMCP, wrist) * 0.85f
-            val pinkyExt = distance(pinkyTip, wrist) > distance(pinkyMCP, wrist) * 0.85f
-            
-            val fingersOpen = middleExt && ringExt && pinkyExt
-            val thumbIndexApart = ratio > 0.95
-            isSendGesture = fingersOpen && thumbIndexApart && !isWriting
-        } else {
-            // First Person Mode: 4 fingers straight
-            val indexStraight = isFingerStraight(indexMCP, landmarks[6], indexTip)
-            val middleStraight = isFingerStraight(middleMCP, landmarks[10], middleTip)
-            val ringStraight = isFingerStraight(ringMCP, landmarks[14], ringTip)
-            val pinkyStraight = isFingerStraight(pinkyMCP, landmarks[18], pinkyTip)
-            
-            isSendGesture = indexStraight && middleStraight && ringStraight && pinkyStraight && !isWriting
-        }
-        
-        if (isSendGesture) {
+        if (sendPoseAchieved) {
              val currentTime = System.currentTimeMillis()
              // Debounce send to avoid multiple triggers
              if (currentTime - lastClearTime > 1000) {
+                  if (isWriting) {
+                      isWriting = false
+                      strokeListener?.onDrawingStateChanged(false)
+                      Log.d("OverlayView", "UP (Send)")
+                      currentPath?.let { drawnPaths.add(it) }
+                      currentPath = null
+                      currentStrokePoints.clear()
+                  }
                   clearDrawing()
                   strokeListener?.onSend()
                   lastClearTime = currentTime
+                  sendPoseStartTime = 0L
              }
         }
         
@@ -559,7 +634,11 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     }
     
     // Checks if the 2D vector from knuckle to PIP is within a similarity threshold (cosine) to PIP to Tip
-    private fun isFingerStraight(mcp: NormalizedLandmark, pip: NormalizedLandmark, tip: NormalizedLandmark, threshold: Float = 0.75f): Boolean {
+    private fun isFingerStraight(mcp: NormalizedLandmark, pip: NormalizedLandmark, tip: NormalizedLandmark, threshold: Float = 0.77f): Boolean {
+        return getFingerCosine(mcp, pip, tip) > threshold
+    }
+
+    private fun getFingerCosine(mcp: NormalizedLandmark, pip: NormalizedLandmark, tip: NormalizedLandmark): Float {
         val mcpX = mcp.x() * imageWidth * scaleFactor
         val mcpY = mcp.y() * imageHeight * scaleFactor
         val pipX = pip.x() * imageWidth * scaleFactor
@@ -576,12 +655,30 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         val mag1 = sqrt((v1x * v1x + v1y * v1y).toDouble()).toFloat()
         val mag2 = sqrt((v2x * v2x + v2y * v2y).toDouble()).toFloat()
         
-        if (mag1 == 0f || mag2 == 0f) return false
-        val cosTheta = dotProduct / (mag1 * mag2)
-        return cosTheta > threshold
+        if (mag1 == 0f || mag2 == 0f) return 0f
+        return dotProduct / (mag1 * mag2)
     }
 
     companion object {
         private const val LANDMARK_STROKE_WIDTH = 8F
+
+        // Default Thresholds (Local camera)
+        const val START_THRESHOLD_DEFAULT = 0.20
+        const val STOP_THRESHOLD_DEFAULT = 0.30
+        const val STOP_THRESHOLD_TAP_DEFAULT = 0.26
+
+        // MJPEG Thresholds (Smart Glasses Classic mode)
+        const val START_THRESHOLD_MJPEG = 0.20
+        const val STOP_THRESHOLD_MJPEG = 0.35
+        const val STOP_THRESHOLD_TAP_MJPEG = 0.26
+
+        // RTSP Thresholds (Lowered for responsiveness on RTSP stream)
+        const val START_THRESHOLD_RTSP = 0.15
+        const val STOP_THRESHOLD_RTSP = 0.25
+        const val STOP_THRESHOLD_TAP_RTSP = 0.20
+
+        // Send Gesture Finger Straightness Thresholds
+        const val FINGER_STRAIGHTNESS_THRESHOLD = 0.80f
+        const val TOTAL_STRAIGHTNESS_THRESHOLD = 3.60f
     }
 }

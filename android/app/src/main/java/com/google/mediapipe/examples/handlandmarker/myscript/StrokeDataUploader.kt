@@ -17,7 +17,7 @@ object StrokeDataUploader {
     private const val TAG = "StrokeDataUploader"
     private const val API_KEY = "airwritingbysamgray646thegoat!"
     private const val UPLOAD_URL = "https://foruiszijstbsroimtbe.supabase.co/functions/v1/upload-stroke"
-    private const val CACHE_DIR_NAME = "strokes"
+    private const val STROKES_DIR_NAME = "strokes"
     private const val MAX_FILES_LIMIT = 200
 
     private val executor = Executors.newSingleThreadExecutor()
@@ -30,63 +30,48 @@ object StrokeDataUploader {
     private val uploadingFiles = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /**
-     * Queues a bitmap to be saved to the cache and then uploaded in the background.
-     * This is non-blocking and safe to call from the UI thread.
+     * Saves a bitmap synchronously to permanent storage and then queues its upload in the background.
+     * Safe to call from the UI thread because the bitmap is small and saving takes minimal time.
      */
     fun queueUpload(context: Context, bitmap: Bitmap, filename: String) {
         val appContext = context.applicationContext
         
-        // Copy the bitmap configuration/pixels on the main thread to ensure it remains unchanged
-        val config = bitmap.config ?: Bitmap.Config.ARGB_8888
-        val bitmapCopy = try {
-            bitmap.copy(config, false)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to copy bitmap", e)
-            return
+        val storageDir = File(appContext.filesDir, STROKES_DIR_NAME)
+        if (!storageDir.exists()) {
+            storageDir.mkdirs()
         }
 
-        executor.execute {
-            try {
-                val cacheDir = File(appContext.cacheDir, CACHE_DIR_NAME)
-                if (!cacheDir.exists()) {
-                    cacheDir.mkdirs()
-                }
+        // 1. Enforce safety cap (max 200 files)
+        enforceCap(storageDir)
 
-                // 1. Enforce safety cap (max 200 files)
-                enforceCap(cacheDir)
-
-                // 2. Save bitmap to cache
-                val file = File(cacheDir, filename)
-                FileOutputStream(file).use { out ->
-                    bitmapCopy.compress(Bitmap.CompressFormat.PNG, 100, out)
-                }
-                bitmapCopy.recycle() // free memory of copy
-
-                Log.d(TAG, "Saved stroke to cache: ${file.absolutePath}")
-
-                // 3. Trigger upload of all cached files
-                triggerUploads(appContext)
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Error saving/uploading stroke", e)
-                try {
-                    bitmapCopy.recycle()
-                } catch (ex: Exception) {}
+        // 2. Save bitmap to permanent storage synchronously
+        val file = File(storageDir, filename)
+        try {
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
+            Log.d(TAG, "Saved stroke synchronously to permanent storage: ${file.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save stroke synchronously", e)
+        }
+
+        // 3. Trigger upload of all pending files asynchronously
+        executor.execute {
+            triggerUploads(appContext)
         }
     }
 
     /**
-     * Triggers upload of all cached files. Can be called on app startup too.
+     * Triggers upload of all pending files in permanent storage. Can be called on app startup too.
      */
     fun triggerUploads(context: Context) {
         val appContext = context.applicationContext
         executor.execute {
             try {
-                val cacheDir = File(appContext.cacheDir, CACHE_DIR_NAME)
-                if (!cacheDir.exists() || !cacheDir.isDirectory) return@execute
+                val storageDir = File(appContext.filesDir, STROKES_DIR_NAME)
+                if (!storageDir.exists() || !storageDir.isDirectory) return@execute
 
-                val files = cacheDir.listFiles() ?: return@execute
+                val files = storageDir.listFiles() ?: return@execute
                 // Sort by lastModified so we process in order
                 files.sortBy { it.lastModified() }
 
@@ -101,8 +86,8 @@ object StrokeDataUploader {
         }
     }
 
-    private fun enforceCap(cacheDir: File) {
-        val files = cacheDir.listFiles() ?: return
+    private fun enforceCap(storageDir: File) {
+        val files = storageDir.listFiles() ?: return
         if (files.size >= MAX_FILES_LIMIT) {
             // Sort by last modified to find oldest
             files.sortBy { it.lastModified() }

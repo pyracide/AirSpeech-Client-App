@@ -454,6 +454,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 myScriptService?.commitAndClear()
             }
             override fun onDoublePinch() {
+                if (!fragmentCameraBinding.overlay.isDoublePinchUndoEnabled) return
                 strokeStartTime = 0L
                 myScriptService?.strokeStartTime = 0L
                 activity?.runOnUiThread {
@@ -891,6 +892,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         currentStreamMode = mode
         applyMirroringState()
         fragmentCameraBinding.overlay.isCenterCrop = (mode == MODE_H264_RTSP)
+        fragmentCameraBinding.overlay.isMjpegMode = (mode == MODE_CLASSIC)
+        fragmentCameraBinding.overlay.isRtspMode = (mode == MODE_H264_RTSP)
         
         // 1. Unbind local camera
         cameraProvider?.unbindAll()
@@ -1257,6 +1260,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         // 1. Disconnect
         smartGlassesService?.disconnect()
         fragmentCameraBinding.overlay.isCenterCrop = false
+        fragmentCameraBinding.overlay.isMjpegMode = false
+        fragmentCameraBinding.overlay.isRtspMode = false
         
         h264Decoder?.stop()
         h264Decoder = null
@@ -1552,6 +1557,11 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         bottomSheetBinding!!.tapGesturesSwitch.isChecked = fragmentCameraBinding.overlay.isTapGesturesEnabled
         bottomSheetBinding!!.tapGesturesSwitch.setOnCheckedChangeListener { _, isChecked ->
             fragmentCameraBinding.overlay.isTapGesturesEnabled = isChecked
+        }
+        
+        bottomSheetBinding!!.doublePinchUndoSwitch.isChecked = fragmentCameraBinding.overlay.isDoublePinchUndoEnabled
+        bottomSheetBinding!!.doublePinchUndoSwitch.setOnCheckedChangeListener { _, isChecked ->
+            fragmentCameraBinding.overlay.isDoublePinchUndoEnabled = isChecked
         }
         
         bottomSheetBinding!!.fistClenchClearSwitch.isChecked = fragmentCameraBinding.overlay.isFistClenchClearEnabled
