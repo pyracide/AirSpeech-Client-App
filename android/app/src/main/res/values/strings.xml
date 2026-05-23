@@ -42,6 +42,13 @@
         Threshold</string>
     <string name="label_hand_presence_confidence_threshold">Presence
         Threshold</string>
+    <string name="label_landmark_draw_mode_only">Show landmarks in draw mode</string>
+    <string name="label_mjpeg_section">— MJPEG Mode —</string>
+    <string name="label_mjpeg_detection_threshold">MJPEG Detection</string>
+    <string name="label_mjpeg_tracking_threshold">MJPEG Tracking</string>
+    <string name="label_mjpeg_presence_threshold">MJPEG Presence</string>
+    <string name="label_mjpeg_finger_straightness">MJPEG Finger Str.</string>
+    <string name="label_mjpeg_total_straightness">MJPEG Total Str.</string>
     <string name="label_num_hands">Number of Hands</string>
     <string name="label_delegate">Delegate</string>
 

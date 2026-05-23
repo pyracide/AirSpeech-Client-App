@@ -412,6 +412,10 @@ class HandLandmarkerHelper(
         const val DEFAULT_HAND_DETECTION_CONFIDENCE = 0.5F
         const val DEFAULT_HAND_TRACKING_CONFIDENCE = 0.5F
         const val DEFAULT_HAND_PRESENCE_CONFIDENCE = 0.5F
+        // MJPEG-mode defaults: lower presence/tracking so noisy JPEG frames don't drop tracking
+        const val DEFAULT_MJPEG_HAND_DETECTION_CONFIDENCE = 0.5F
+        const val DEFAULT_MJPEG_HAND_TRACKING_CONFIDENCE = 0.3F
+        const val DEFAULT_MJPEG_HAND_PRESENCE_CONFIDENCE = 0.3F
         const val DEFAULT_NUM_HANDS = 1
         const val OTHER_ERROR = 0
         const val GPU_ERROR = 1

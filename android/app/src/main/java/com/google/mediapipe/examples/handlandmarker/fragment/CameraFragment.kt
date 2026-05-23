@@ -112,7 +112,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var lastSocketUrl = "ws://192.168.1.65:81"
     private var defaultHomeMjpeg = "ws://192.168.1.65:81"
     private var defaultHomeRtsp = "rtsp://192.168.1.251:554/stream"
-    private var defaultHotspotMjpeg = "ws://192.168.1.65:81"
+    private var defaultHotspotMjpeg = "ws://10.155.72.233:81"
     private var defaultHotspotRtsp = "rtsp://10.155.72.108:554/stream"
     private var h264Decoder: H264Decoder? = null
     
@@ -149,6 +149,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var llmScalingMode = 0
     private var scraperTargetHeight = 420
     private var isDebugOverlaysEnabled = false
+    private var isLandmarkInDrawModeEnabled = false
+    private var mjpegFingerStraightnessThreshold = 0.78f
+    private var mjpegTotalStraightnessThreshold = 3.40f
     
     private val camFpsQueue = java.util.ArrayDeque<Long>()
     private val mpFpsQueue = java.util.ArrayDeque<Long>()
@@ -210,6 +213,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             // Close the HandLandmarkerHelper and release resources
             backgroundExecutor.execute { handLandmarkerHelper.clearHandLandmarker() }
         }
+        saveConfidenceSettings()
         
         // Stop Smart Glasses if running
         smartGlassesService?.disconnect()
@@ -258,6 +262,12 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         super.onViewCreated(view, savedInstanceState)
         
         loadConnectionSettings()
+        loadConfidenceSettings()
+
+        // Push loaded overlay parameters to OverlayView
+        fragmentCameraBinding.overlay.mjpegFingerStraightnessThreshold = mjpegFingerStraightnessThreshold
+        fragmentCameraBinding.overlay.mjpegTotalStraightnessThreshold = mjpegTotalStraightnessThreshold
+        fragmentCameraBinding.overlay.isLandmarkInDrawModeEnabled = isLandmarkInDrawModeEnabled
 
         // Initialize our background executor
         backgroundExecutor = Executors.newSingleThreadExecutor()
@@ -939,6 +949,13 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             fragmentCameraBinding.smartGlassesView.visibility = View.VISIBLE
             fragmentCameraBinding.smartGlassesH264View.visibility = View.GONE
             
+            // Apply MJPEG-specific MediaPipe confidence settings
+            if (this::handLandmarkerHelper.isInitialized) {
+                handLandmarkerHelper.minHandDetectionConfidence = viewModel.currentMjpegMinHandDetectionConfidence
+                handLandmarkerHelper.minHandTrackingConfidence = viewModel.currentMjpegMinHandTrackingConfidence
+                handLandmarkerHelper.minHandPresenceConfidence = viewModel.currentMjpegMinHandPresenceConfidence
+            }
+            
             // Connect immediately for MJPEG
             smartGlassesService?.connect(url, false)
         }
@@ -1184,6 +1201,46 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         isRtspMirrored = prefs.getBoolean("is_rtsp_mirrored", false)
     }
 
+    private fun saveConfidenceSettings() {
+        val prefs = requireContext().getSharedPreferences("mediapipe_settings", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            // Standard (local camera / RTSP) confidences
+            putFloat("std_detection", viewModel.currentMinHandDetectionConfidence)
+            putFloat("std_tracking", viewModel.currentMinHandTrackingConfidence)
+            putFloat("std_presence", viewModel.currentMinHandPresenceConfidence)
+            // MJPEG-specific confidences
+            putFloat("mjpeg_detection", viewModel.currentMjpegMinHandDetectionConfidence)
+            putFloat("mjpeg_tracking", viewModel.currentMjpegMinHandTrackingConfidence)
+            putFloat("mjpeg_presence", viewModel.currentMjpegMinHandPresenceConfidence)
+            // Landmark draw mode switch
+            putBoolean("landmark_in_draw_mode_enabled", isLandmarkInDrawModeEnabled)
+            // MJPEG first person send thresholds
+            putFloat("mjpeg_finger_straightness", mjpegFingerStraightnessThreshold)
+            putFloat("mjpeg_total_straightness", mjpegTotalStraightnessThreshold)
+            apply()
+        }
+    }
+
+    private fun loadConfidenceSettings() {
+        val prefs = requireContext().getSharedPreferences("mediapipe_settings", Context.MODE_PRIVATE)
+        viewModel.setMinHandDetectionConfidence(
+            prefs.getFloat("std_detection", HandLandmarkerHelper.DEFAULT_HAND_DETECTION_CONFIDENCE))
+        viewModel.setMinHandTrackingConfidence(
+            prefs.getFloat("std_tracking", HandLandmarkerHelper.DEFAULT_HAND_TRACKING_CONFIDENCE))
+        viewModel.setMinHandPresenceConfidence(
+            prefs.getFloat("std_presence", HandLandmarkerHelper.DEFAULT_HAND_PRESENCE_CONFIDENCE))
+        viewModel.setMjpegMinHandDetectionConfidence(
+            prefs.getFloat("mjpeg_detection", HandLandmarkerHelper.DEFAULT_MJPEG_HAND_DETECTION_CONFIDENCE))
+        viewModel.setMjpegMinHandTrackingConfidence(
+            prefs.getFloat("mjpeg_tracking", HandLandmarkerHelper.DEFAULT_MJPEG_HAND_TRACKING_CONFIDENCE))
+        viewModel.setMjpegMinHandPresenceConfidence(
+            prefs.getFloat("mjpeg_presence", HandLandmarkerHelper.DEFAULT_MJPEG_HAND_PRESENCE_CONFIDENCE))
+        
+        isLandmarkInDrawModeEnabled = prefs.getBoolean("landmark_in_draw_mode_enabled", false)
+        mjpegFingerStraightnessThreshold = prefs.getFloat("mjpeg_finger_straightness", 0.78f)
+        mjpegTotalStraightnessThreshold = prefs.getFloat("mjpeg_total_straightness", 3.40f)
+    }
+
     private fun adjustAspectRatio(videoWidth: Int, videoHeight: Int) {
         val container = fragmentCameraBinding.smartGlassesH264View.parent as? View ?: return
         val containerWidth = container.width
@@ -1267,6 +1324,13 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         h264Decoder = null
         
         releaseRtspPlayer()
+        
+        // Restore standard (non-MJPEG) confidence values
+        if (this::handLandmarkerHelper.isInitialized) {
+            handLandmarkerHelper.minHandDetectionConfidence = viewModel.currentMinHandDetectionConfidence
+            handLandmarkerHelper.minHandTrackingConfidence = viewModel.currentMinHandTrackingConfidence
+            handLandmarkerHelper.minHandPresenceConfidence = viewModel.currentMinHandPresenceConfidence
+        }
         
         // 2. Hide SG View
         fragmentCameraBinding.smartGlassesView.setImageBitmap(null)
@@ -1400,6 +1464,66 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             }
         }
 
+        // MJPEG Detection threshold
+        bottomSheetBinding!!.mjpegDetectionThresholdMinus.setOnClickListener {
+            if (viewModel.currentMjpegMinHandDetectionConfidence >= 0.2) {
+                viewModel.setMjpegMinHandDetectionConfidence(viewModel.currentMjpegMinHandDetectionConfidence - 0.1f)
+                if (isSmartGlassesMode && currentStreamMode == MODE_CLASSIC && this::handLandmarkerHelper.isInitialized) {
+                    handLandmarkerHelper.minHandDetectionConfidence = viewModel.currentMjpegMinHandDetectionConfidence
+                }
+                updateControlsUi()
+            }
+        }
+        bottomSheetBinding!!.mjpegDetectionThresholdPlus.setOnClickListener {
+            if (viewModel.currentMjpegMinHandDetectionConfidence <= 0.8) {
+                viewModel.setMjpegMinHandDetectionConfidence(viewModel.currentMjpegMinHandDetectionConfidence + 0.1f)
+                if (isSmartGlassesMode && currentStreamMode == MODE_CLASSIC && this::handLandmarkerHelper.isInitialized) {
+                    handLandmarkerHelper.minHandDetectionConfidence = viewModel.currentMjpegMinHandDetectionConfidence
+                }
+                updateControlsUi()
+            }
+        }
+
+        // MJPEG Tracking threshold
+        bottomSheetBinding!!.mjpegTrackingThresholdMinus.setOnClickListener {
+            if (viewModel.currentMjpegMinHandTrackingConfidence >= 0.2) {
+                viewModel.setMjpegMinHandTrackingConfidence(viewModel.currentMjpegMinHandTrackingConfidence - 0.1f)
+                if (isSmartGlassesMode && currentStreamMode == MODE_CLASSIC && this::handLandmarkerHelper.isInitialized) {
+                    handLandmarkerHelper.minHandTrackingConfidence = viewModel.currentMjpegMinHandTrackingConfidence
+                }
+                updateControlsUi()
+            }
+        }
+        bottomSheetBinding!!.mjpegTrackingThresholdPlus.setOnClickListener {
+            if (viewModel.currentMjpegMinHandTrackingConfidence <= 0.8) {
+                viewModel.setMjpegMinHandTrackingConfidence(viewModel.currentMjpegMinHandTrackingConfidence + 0.1f)
+                if (isSmartGlassesMode && currentStreamMode == MODE_CLASSIC && this::handLandmarkerHelper.isInitialized) {
+                    handLandmarkerHelper.minHandTrackingConfidence = viewModel.currentMjpegMinHandTrackingConfidence
+                }
+                updateControlsUi()
+            }
+        }
+
+        // MJPEG Presence threshold
+        bottomSheetBinding!!.mjpegPresenceThresholdMinus.setOnClickListener {
+            if (viewModel.currentMjpegMinHandPresenceConfidence >= 0.2) {
+                viewModel.setMjpegMinHandPresenceConfidence(viewModel.currentMjpegMinHandPresenceConfidence - 0.1f)
+                if (isSmartGlassesMode && currentStreamMode == MODE_CLASSIC && this::handLandmarkerHelper.isInitialized) {
+                    handLandmarkerHelper.minHandPresenceConfidence = viewModel.currentMjpegMinHandPresenceConfidence
+                }
+                updateControlsUi()
+            }
+        }
+        bottomSheetBinding!!.mjpegPresenceThresholdPlus.setOnClickListener {
+            if (viewModel.currentMjpegMinHandPresenceConfidence <= 0.8) {
+                viewModel.setMjpegMinHandPresenceConfidence(viewModel.currentMjpegMinHandPresenceConfidence + 0.1f)
+                if (isSmartGlassesMode && currentStreamMode == MODE_CLASSIC && this::handLandmarkerHelper.isInitialized) {
+                    handLandmarkerHelper.minHandPresenceConfidence = viewModel.currentMjpegMinHandPresenceConfidence
+                }
+                updateControlsUi()
+            }
+        }
+
         // When clicked, reduce the number of hands that can be detected at a
         // time
         bottomSheetBinding!!.maxHandsMinus.setOnClickListener {
@@ -1456,6 +1580,49 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         bottomSheetBinding!!.debugOverlaysSwitch.setOnCheckedChangeListener { _, isChecked ->
             isDebugOverlaysEnabled = isChecked
             updateDebugOverlaysVisibility()
+        }
+
+        bottomSheetBinding!!.landmarkDrawModeOnlySwitch.isChecked = isLandmarkInDrawModeEnabled
+        bottomSheetBinding!!.landmarkDrawModeOnlySwitch.setOnCheckedChangeListener { _, isChecked ->
+            isLandmarkInDrawModeEnabled = isChecked
+            fragmentCameraBinding.overlay.isLandmarkInDrawModeEnabled = isChecked
+            saveConfidenceSettings()
+        }
+
+        // MJPEG Finger Straightness threshold minus/plus buttons
+        bottomSheetBinding!!.mjpegFingerStraightnessMinus.setOnClickListener {
+            if (mjpegFingerStraightnessThreshold >= 0.55f) {
+                mjpegFingerStraightnessThreshold -= 0.05f
+                fragmentCameraBinding.overlay.mjpegFingerStraightnessThreshold = mjpegFingerStraightnessThreshold
+                saveConfidenceSettings()
+                updateControlsUi()
+            }
+        }
+        bottomSheetBinding!!.mjpegFingerStraightnessPlus.setOnClickListener {
+            if (mjpegFingerStraightnessThreshold <= 0.95f) {
+                mjpegFingerStraightnessThreshold += 0.05f
+                fragmentCameraBinding.overlay.mjpegFingerStraightnessThreshold = mjpegFingerStraightnessThreshold
+                saveConfidenceSettings()
+                updateControlsUi()
+            }
+        }
+
+        // MJPEG Total Straightness threshold minus/plus buttons
+        bottomSheetBinding!!.mjpegTotalStraightnessMinus.setOnClickListener {
+            if (mjpegTotalStraightnessThreshold >= 2.10f) {
+                mjpegTotalStraightnessThreshold -= 0.10f
+                fragmentCameraBinding.overlay.mjpegTotalStraightnessThreshold = mjpegTotalStraightnessThreshold
+                saveConfidenceSettings()
+                updateControlsUi()
+            }
+        }
+        bottomSheetBinding!!.mjpegTotalStraightnessPlus.setOnClickListener {
+            if (mjpegTotalStraightnessThreshold <= 3.90f) {
+                mjpegTotalStraightnessThreshold += 0.10f
+                fragmentCameraBinding.overlay.mjpegTotalStraightnessThreshold = mjpegTotalStraightnessThreshold
+                saveConfidenceSettings()
+                updateControlsUi()
+            }
         }
 
         bottomSheetBinding!!.ngramDebugSwitch.setOnCheckedChangeListener { _, isChecked ->
@@ -1624,6 +1791,22 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 "%.2f",
                 handLandmarkerHelper.minHandPresenceConfidence
             )
+
+        // MJPEG confidence values (read from ViewModel, not helper — these are the stored targets)
+        bottomSheetBinding!!.mjpegDetectionThresholdValue.text =
+            String.format(Locale.US, "%.2f", viewModel.currentMjpegMinHandDetectionConfidence)
+        bottomSheetBinding!!.mjpegTrackingThresholdValue.text =
+            String.format(Locale.US, "%.2f", viewModel.currentMjpegMinHandTrackingConfidence)
+        bottomSheetBinding!!.mjpegPresenceThresholdValue.text =
+            String.format(Locale.US, "%.2f", viewModel.currentMjpegMinHandPresenceConfidence)
+
+        // MJPEG straightness values
+        bottomSheetBinding!!.mjpegFingerStraightnessValue.text =
+            String.format(Locale.US, "%.2f", mjpegFingerStraightnessThreshold)
+        bottomSheetBinding!!.mjpegTotalStraightnessValue.text =
+            String.format(Locale.US, "%.2f", mjpegTotalStraightnessThreshold)
+
+        bottomSheetBinding!!.landmarkDrawModeOnlySwitch.isChecked = isLandmarkInDrawModeEnabled
             
         bottomSheetBinding!!.ngramWeightValue.text = String.format(Locale.US, "%.1f", ngWeight)
         bottomSheetBinding!!.ngramDebugSwitch.isChecked = isDecoderDebugEnabled

@@ -86,6 +86,13 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     var isMjpegMode: Boolean = false
     var isRtspMode: Boolean = false
     var isCenterCrop: Boolean = false
+    var mjpegFingerStraightnessThreshold: Float = 0.78f
+    var mjpegTotalStraightnessThreshold: Float = 3.40f
+    var isLandmarkInDrawModeEnabled: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
     var isDebugOverlayEnabled: Boolean = false
         set(value) {
             field = value
@@ -191,8 +198,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                      drawingDotPaint
                  )
             }
-            
-        } else {
+        }
+
+        // Draw normal skeleton if draw mode is OFF OR if draw mode is ON and landmark visual is enabled
+        if (!isDrawingMode || isLandmarkInDrawModeEnabled) {
             // Normal Skeleton Mode
             results?.let { handLandmarkerResult ->
                 for (landmark in handLandmarkerResult.landmarks()) {
@@ -525,14 +534,17 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val ringCos = getFingerCosine(ringMCP, landmarks[14], ringTip)
             val pinkyCos = getFingerCosine(pinkyMCP, landmarks[18], pinkyTip)
 
-            val indexStraight = indexCos > FINGER_STRAIGHTNESS_THRESHOLD
-            val middleStraight = middleCos > FINGER_STRAIGHTNESS_THRESHOLD
-            val ringStraight = ringCos > FINGER_STRAIGHTNESS_THRESHOLD
-            val pinkyStraight = pinkyCos > FINGER_STRAIGHTNESS_THRESHOLD
+            val fingerStraightnessThreshold = if (isMjpegMode) mjpegFingerStraightnessThreshold else FINGER_STRAIGHTNESS_THRESHOLD
+            val totalStraightnessThreshold = if (isMjpegMode) mjpegTotalStraightnessThreshold else TOTAL_STRAIGHTNESS_THRESHOLD
+
+            val indexStraight = indexCos > fingerStraightnessThreshold
+            val middleStraight = middleCos > fingerStraightnessThreshold
+            val ringStraight = ringCos > fingerStraightnessThreshold
+            val pinkyStraight = pinkyCos > fingerStraightnessThreshold
 
             val totalStraightness = indexCos + middleCos + ringCos + pinkyCos
 
-            indexStraight && middleStraight && ringStraight && pinkyStraight && totalStraightness > TOTAL_STRAIGHTNESS_THRESHOLD
+            indexStraight && middleStraight && ringStraight && pinkyStraight && totalStraightness > totalStraightnessThreshold
         }
 
         if (isSendPose) {
