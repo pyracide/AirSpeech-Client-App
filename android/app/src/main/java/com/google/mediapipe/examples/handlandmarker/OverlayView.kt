@@ -63,7 +63,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     private var currentPath: Path? = null
     
     // MyScript Integration
+    private class ScreenPoint(val x: Float, val y: Float, val t: Long)
+    private val currentScreenPoints = mutableListOf<ScreenPoint>()
     private val currentStrokePoints = mutableListOf<MyScriptService.PointData>()
+    private var unpinchStartTime: Long = 0L
     var strokeListener: OnStrokeListener? = null
     private var lastClearTime = 0L
     private var tapCount = 0
@@ -133,6 +136,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         currentPath = null
         isWriting = false
         currentStrokePoints.clear()
+        currentScreenPoints.clear()
+        unpinchStartTime = 0L
         handLostTime = 0L
         Log.d("OverlayView", "CLEAR")
     }
@@ -141,6 +146,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         results = null
         isTapTriggered = false
         isWriting = false
+        currentScreenPoints.clear()
+        unpinchStartTime = 0L
         handLostTime = 0L
         invalidate()
     }
@@ -439,6 +446,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             }
             currentPath = null
             currentStrokePoints.clear()
+            currentScreenPoints.clear()
+            unpinchStartTime = 0L
             drawnPaths.clear()
             val indexX = indexTip.x() * imageWidth * scaleFactor + offsetX
             val indexY = indexTip.y() * imageHeight * scaleFactor + offsetY
@@ -454,6 +463,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             }
             currentPath = null
             currentStrokePoints.clear()
+            currentScreenPoints.clear()
+            unpinchStartTime = 0L
             
             // Process fist clench clear gesture if enabled
             if (isFistClenchClearEnabled) {
@@ -559,6 +570,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
 
         // --- Pinch Detection (The "Pen" with Hysteresis) ---
         var justStarted = false
+        val nowTime = System.currentTimeMillis()
         if (!isWriting && ratio < START_THRESHOLD) {
             isWriting = true
             strokeListener?.onDrawingStateChanged(true)
@@ -573,26 +585,61 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val y = avgY * imageHeight * scaleFactor + offsetY
             currentPath?.moveTo(x, y)
             currentStrokePoints.clear()
+            currentScreenPoints.clear()
+            unpinchStartTime = 0L
             
             val scaledX = (avgX * imageWidth * scaleFactor) * coordinateScale + offsetX
             val scaledY = (avgY * imageHeight * scaleFactor) * coordinateScale + offsetY
-            currentStrokePoints.add(MyScriptService.PointData(scaledX, scaledY, System.currentTimeMillis()))
+            currentStrokePoints.add(MyScriptService.PointData(scaledX, scaledY, nowTime))
+            currentScreenPoints.add(ScreenPoint(x, y, nowTime))
          } else if (isWriting && ratio > STOP_THRESHOLD && (!isSendPose || sendPoseAchieved)) {
-             isWriting = false
-             strokeListener?.onDrawingStateChanged(false)
-             Log.d("OverlayView", "UP")
-            // Commit path
-            currentPath?.let { drawnPaths.add(it) }
-            currentPath = null
-            
-            // Notify listener
-            if (currentStrokePoints.isNotEmpty()) {
-                strokeListener?.onStroke(ArrayList(currentStrokePoints))
-                currentStrokePoints.clear()
-            }
-        }
+             var shouldStop = true
+             if (isMjpegMode) {
+                 if (unpinchStartTime == 0L) {
+                     unpinchStartTime = nowTime
+                 }
+                 if (nowTime - unpinchStartTime < MJPEG_UNPINCH_DEBOUNCE_MS) {
+                     shouldStop = false
+                 } else {
+                     // Real unpinch confirmed. Truncate points added during debounce
+                     currentStrokePoints.removeAll { it.timestamp >= unpinchStartTime }
+                     currentScreenPoints.removeAll { it.t >= unpinchStartTime }
+                     
+                     // Rebuild currentPath
+                     currentPath = Path()
+                     if (currentScreenPoints.isNotEmpty()) {
+                         currentPath?.moveTo(currentScreenPoints[0].x, currentScreenPoints[0].y)
+                         for (i in 1 until currentScreenPoints.size) {
+                             currentPath?.lineTo(currentScreenPoints[i].x, currentScreenPoints[i].y)
+                         }
+                     } else {
+                         currentPath = null
+                     }
+                 }
+             }
+
+             if (shouldStop) {
+                 isWriting = false
+                 strokeListener?.onDrawingStateChanged(false)
+                 Log.d("OverlayView", "UP")
+                 // Commit path
+                 currentPath?.let { drawnPaths.add(it) }
+                 currentPath = null
+                 
+                 // Notify listener
+                 if (currentStrokePoints.isNotEmpty()) {
+                     strokeListener?.onStroke(ArrayList(currentStrokePoints))
+                     currentStrokePoints.clear()
+                     currentScreenPoints.clear()
+                 }
+                 unpinchStartTime = 0L
+             }
+         }
         
         if (isWriting && !justStarted && !sendPoseAchieved) {
+            if (ratio <= STOP_THRESHOLD) {
+                unpinchStartTime = 0L
+            }
             val avgX = (indexTip.x() + thumbTip.x()) / 2f
             val avgY = (indexTip.y() + thumbTip.y()) / 2f
             
@@ -602,7 +649,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             
             val scaledX = (avgX * imageWidth * scaleFactor) * coordinateScale + offsetX
             val scaledY = (avgY * imageHeight * scaleFactor) * coordinateScale + offsetY
-            currentStrokePoints.add(MyScriptService.PointData(scaledX, scaledY, System.currentTimeMillis()))
+            currentStrokePoints.add(MyScriptService.PointData(scaledX, scaledY, nowTime))
+            currentScreenPoints.add(ScreenPoint(x, y, nowTime))
         }
         
         // --- The "Send" Gesture ---
@@ -617,6 +665,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                       currentPath?.let { drawnPaths.add(it) }
                       currentPath = null
                       currentStrokePoints.clear()
+                      currentScreenPoints.clear()
                   }
                   clearDrawing()
                   strokeListener?.onSend()
@@ -692,5 +741,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         // Send Gesture Finger Straightness Thresholds
         const val FINGER_STRAIGHTNESS_THRESHOLD = 0.80f
         const val TOTAL_STRAIGHTNESS_THRESHOLD = 3.60f
+
+        // MJPEG Debounce Settings (in milliseconds)
+        const val MJPEG_UNPINCH_DEBOUNCE_MS = 100L
     }
 }
