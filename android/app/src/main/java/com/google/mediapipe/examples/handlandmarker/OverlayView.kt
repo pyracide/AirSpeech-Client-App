@@ -664,6 +664,9 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                       Log.d("OverlayView", "UP (Send)")
                       currentPath?.let { drawnPaths.add(it) }
                       currentPath = null
+                      if (currentStrokePoints.isNotEmpty()) {
+                          strokeListener?.onStroke(ArrayList(currentStrokePoints))
+                      }
                       currentStrokePoints.clear()
                       currentScreenPoints.clear()
                   }
