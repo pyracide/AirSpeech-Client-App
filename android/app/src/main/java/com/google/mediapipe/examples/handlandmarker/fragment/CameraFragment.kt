@@ -1971,8 +1971,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                     // Retrigger threshold: dynamically adjust target trigger size based on streaming mode
                     val retriggerThreshold = when {
                         isSmartGlassesMode && fragmentCameraBinding.overlay.isMjpegMode -> 0.075f // half as big: 0.15f * 0.5f
-                        isSmartGlassesMode && fragmentCameraBinding.overlay.isRtspMode -> 0.1125f // 3/4 as big: 0.15f * 0.75f
-                        else -> 0.15f
+                        isSmartGlassesMode && fragmentCameraBinding.overlay.isRtspMode -> 0.075f // reduced to match MJPEG (0.075f)
+                        else -> 0.075f // reduced to match MJPEG (0.075f)
                     }
                     if (handWidth < retriggerThreshold) {
                         Log.d(TAG, "Hand too small ($handWidth) for threshold ($retriggerThreshold). Retriggering detection...")
