@@ -145,10 +145,12 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var isJiixDebugEnabled = false
     private var decoderMode = MyScriptService.DecoderMode.LLM_RAW_TTS
     private var llmTimeoutMs = 1000L
+    private var unpinchDebounceMs = 100L
     private var llmModelIndex = 0
     private var llmScalingMode = 0
     private var scraperTargetHeight = 420
     private var isDebugOverlaysEnabled = false
+    private var lensDistortionK1 = 0f
     private var isLandmarkInDrawModeEnabled = false
     private var mjpegFingerStraightnessThreshold = 0.78f
     private var mjpegTotalStraightnessThreshold = 3.40f
@@ -198,6 +200,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         if (isSmartGlassesMode) {
             enableSmartGlasses(lastSocketUrl, currentStreamMode)
         }
+        
+        fragmentCameraBinding.overlay.lensDistortionK1 = lensDistortionK1
+        fragmentCameraBinding.overlay.unpinchDebounceMs = unpinchDebounceMs
     }
 
     override fun onPause() {
@@ -214,6 +219,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             backgroundExecutor.execute { handLandmarkerHelper.clearHandLandmarker() }
         }
         saveConfidenceSettings()
+        saveConnectionSettings()
         
         // Stop Smart Glasses if running
         smartGlassesService?.disconnect()
@@ -268,6 +274,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         fragmentCameraBinding.overlay.mjpegFingerStraightnessThreshold = mjpegFingerStraightnessThreshold
         fragmentCameraBinding.overlay.mjpegTotalStraightnessThreshold = mjpegTotalStraightnessThreshold
         fragmentCameraBinding.overlay.isLandmarkInDrawModeEnabled = isLandmarkInDrawModeEnabled
+        fragmentCameraBinding.overlay.unpinchDebounceMs = unpinchDebounceMs
+        fragmentCameraBinding.overlay.lensDistortionK1 = lensDistortionK1
 
         // Initialize our background executor
         backgroundExecutor = Executors.newSingleThreadExecutor()
@@ -1188,6 +1196,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             putBoolean("is_smart_glasses_mode", isSmartGlassesMode)
             putBoolean("is_mjpeg_mirrored", isMjpegMirrored)
             putBoolean("is_rtsp_mirrored", isRtspMirrored)
+            putLong("unpinch_debounce", unpinchDebounceMs)
+            putFloat("lens_distortion_k1", lensDistortionK1)
             apply()
         }
     }
@@ -1199,6 +1209,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         isSmartGlassesMode = prefs.getBoolean("is_smart_glasses_mode", false)
         isMjpegMirrored = prefs.getBoolean("is_mjpeg_mirrored", false)
         isRtspMirrored = prefs.getBoolean("is_rtsp_mirrored", false)
+        unpinchDebounceMs = prefs.getLong("unpinch_debounce", 100L)
+        lensDistortionK1 = prefs.getFloat("lens_distortion_k1", 0f)
     }
 
     private fun saveConfidenceSettings() {
@@ -1576,6 +1588,36 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             }
         }
         
+        bottomSheetBinding!!.unpinchDebounceMinus.setOnClickListener {
+            if (unpinchDebounceMs > 0L) {
+                unpinchDebounceMs -= 50L
+                fragmentCameraBinding.overlay.unpinchDebounceMs = unpinchDebounceMs
+                updateControlsUi()
+            }
+        }
+        
+        bottomSheetBinding!!.unpinchDebouncePlus.setOnClickListener {
+            if (unpinchDebounceMs < 1000L) {
+                unpinchDebounceMs += 50L
+                fragmentCameraBinding.overlay.unpinchDebounceMs = unpinchDebounceMs
+                updateControlsUi()
+            }
+        }
+
+        bottomSheetBinding!!.lensDistortionValue.text = String.format(Locale.US, "%.2f", lensDistortionK1)
+        bottomSheetBinding!!.lensDistortionMinus.setOnClickListener {
+            lensDistortionK1 -= 0.02f
+            fragmentCameraBinding.overlay.lensDistortionK1 = lensDistortionK1
+            saveConnectionSettings()
+            updateControlsUi()
+        }
+        bottomSheetBinding!!.lensDistortionPlus.setOnClickListener {
+            lensDistortionK1 += 0.02f
+            fragmentCameraBinding.overlay.lensDistortionK1 = lensDistortionK1
+            saveConnectionSettings()
+            updateControlsUi()
+        }
+        
         bottomSheetBinding!!.debugOverlaysSwitch.isChecked = isDebugOverlaysEnabled
         bottomSheetBinding!!.debugOverlaysSwitch.setOnCheckedChangeListener { _, isChecked ->
             isDebugOverlaysEnabled = isChecked
@@ -1664,6 +1706,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                     }
                     myScriptService?.decoderMode = decoderMode
                     myScriptService?.llmTimeoutMs = llmTimeoutMs
+                    
                     if (decoderMode == MyScriptService.DecoderMode.LLM || decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) {
                         myScriptService?.preloadLlm()
                     }
@@ -1809,6 +1852,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         bottomSheetBinding!!.landmarkDrawModeOnlySwitch.isChecked = isLandmarkInDrawModeEnabled
             
         bottomSheetBinding!!.ngramWeightValue.text = String.format(Locale.US, "%.1f", ngWeight)
+        bottomSheetBinding!!.llmTimeoutValue.text = String.format(Locale.US, "%.1f", llmTimeoutMs / 1000f)
+        bottomSheetBinding!!.unpinchDebounceValue.text = unpinchDebounceMs.toString()
+        bottomSheetBinding!!.lensDistortionValue.text = String.format(Locale.US, "%.2f", lensDistortionK1)
         bottomSheetBinding!!.ngramDebugSwitch.isChecked = isDecoderDebugEnabled
         bottomSheetBinding!!.spinnerRecognitionMode.setSelection(getDecoderModeIndex(), false)
         bottomSheetBinding!!.spinnerLlmModel.setSelection(llmModelIndex, false)
@@ -1818,7 +1864,6 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
 
         val isLlmMode = decoderMode == MyScriptService.DecoderMode.LLM || decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS
         bottomSheetBinding!!.llmTimeoutRow.visibility = if (isLlmMode) View.VISIBLE else View.GONE
-        bottomSheetBinding!!.llmTimeoutValue.text = String.format(Locale.US, "%.1f", llmTimeoutMs / 1000f)
         bottomSheetBinding!!.llmModelRow.visibility = if (isLlmMode) View.VISIBLE else View.GONE
 
         fragmentCameraBinding.btnResetLlmContext.visibility =
@@ -2013,6 +2058,10 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 // Force a redraw
                 fragmentCameraBinding.overlay.invalidate()
                 
+                // Update debounce active indicator
+                fragmentCameraBinding.textDebounceActive.visibility = 
+                    if (isDebugOverlaysEnabled && fragmentCameraBinding.overlay.isDebounceActive) View.VISIBLE else View.GONE
+                
             }
         }
     }
@@ -2042,6 +2091,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         
         val isLlmMode = decoderMode == MyScriptService.DecoderMode.LLM || decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS
         fragmentCameraBinding.textLlmStatus.visibility = if (isDebugOverlaysEnabled && isLlmMode) View.VISIBLE else View.GONE
+        fragmentCameraBinding.textDebounceActive.visibility = if (isDebugOverlaysEnabled && fragmentCameraBinding.overlay.isDebounceActive) View.VISIBLE else View.GONE
         
         fragmentCameraBinding.textNgramDebug.visibility = if (isDebugOverlaysEnabled && isDecoderDebugEnabled) View.VISIBLE else View.GONE
         

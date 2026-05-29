@@ -199,6 +199,22 @@
         app:layout_constraintTop_toBottomOf="@id/text_confidence_debug"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <TextView
+        android:id="@+id/text_debounce_active"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/glass_panel_bg"
+        android:padding="8dp"
+        android:textColor="#FF9800"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:text="Debounce Active"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/view_finder"
+        app:layout_constraintEnd_toEndOf="@id/view_finder" />
+
     <LinearLayout
         android:id="@+id/top_controls_row"
         android:layout_width="match_parent"

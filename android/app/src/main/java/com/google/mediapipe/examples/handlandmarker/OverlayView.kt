@@ -42,6 +42,13 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     private var drawingPaint = Paint()
     private var drawingDotPaint = Paint()
     private var centerDotPaint = Paint()
+    private var pinkDotPaint = Paint()
+
+    var lensDistortionK1: Float = 0f
+        set(value) {
+            field = value
+            invalidate()
+        }
 
     private var scaleFactor: Float = 1f
     private var imageWidth: Int = 1
@@ -61,6 +68,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     private var isWriting: Boolean = false
     private val drawnPaths = mutableListOf<Path>()
     private var currentPath: Path? = null
+    var unpinchDebounceMs: Long = 100L
+    var isDebounceActive: Boolean = false
     
     // MyScript Integration
     private class ScreenPoint(val x: Float, val y: Float, val t: Long)
@@ -134,10 +143,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     fun clearDrawing() {
         drawnPaths.clear()
         currentPath = null
-        isWriting = false
+        unpinchStartTime = 0L
+        isDebounceActive = false
         currentStrokePoints.clear()
         currentScreenPoints.clear()
-        unpinchStartTime = 0L
         handLostTime = 0L
         Log.d("OverlayView", "CLEAR")
     }
@@ -175,6 +184,31 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         centerDotPaint.color = Color.MAGENTA
         centerDotPaint.style = Paint.Style.FILL
         centerDotPaint.isAntiAlias = true
+
+        pinkDotPaint.color = Color.parseColor("#FF00FF")
+        pinkDotPaint.style = Paint.Style.FILL
+        pinkDotPaint.isAntiAlias = true
+    }
+
+    fun compensateDistortion(x: Float, y: Float): Pair<Float, Float> {
+        if (lensDistortionK1 == 0f) {
+            return Pair(x, y)
+        }
+        // Normalize x, y from [0, 1] to [-1, 1]
+        val xc = 2f * x - 1f
+        val yc = 2f * y - 1f
+        
+        val r2 = xc * xc + yc * yc
+        val factor = 1f + lensDistortionK1 * r2
+        
+        val xcp = xc * factor
+        val ycp = yc * factor
+        
+        // Denormalize back to [0, 1]
+        val xp = (xcp + 1f) / 2f
+        val yp = (ycp + 1f) / 2f
+        
+        return Pair(xp, yp)
     }
 
     override fun draw(canvas: Canvas) {
@@ -196,14 +230,24 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                  val thumbTip = landmark[4]
                  val indexTip = landmark[8]
                  
-                 val avgX = (indexTip.x() + thumbTip.x()) / 2f
-                 val avgY = (indexTip.y() + thumbTip.y()) / 2f
+                 val rawAvgX = (indexTip.x() + thumbTip.x()) / 2f
+                 val rawAvgY = (indexTip.y() + thumbTip.y()) / 2f
+                 val (avgX, avgY) = compensateDistortion(rawAvgX, rawAvgY)
                  
                  canvas.drawPoint(
                      avgX * imageWidth * scaleFactor + offsetX,
                      avgY * imageHeight * scaleFactor + offsetY,
                      drawingDotPaint
                  )
+                 
+                 if (lensDistortionK1 != 0f && isDebugOverlayEnabled) {
+                     canvas.drawCircle(
+                         rawAvgX * imageWidth * scaleFactor + offsetX,
+                         rawAvgY * imageHeight * scaleFactor + offsetY,
+                         10f,
+                         pinkDotPaint
+                     )
+                 }
             }
         }
 
@@ -366,8 +410,9 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                 // Just track midpoint for debug
                 val thumbTip = firstHand[4]
                 val indexTip = firstHand[8]
-                val avgX = (indexTip.x() + thumbTip.x()) / 2f
-                val avgY = (indexTip.y() + thumbTip.y()) / 2f
+                val rawAvgX = (indexTip.x() + thumbTip.x()) / 2f
+                val rawAvgY = (indexTip.y() + thumbTip.y()) / 2f
+                val (avgX, avgY) = compensateDistortion(rawAvgX, rawAvgY)
                 
                 val x = avgX * imageWidth * scaleFactor + offsetX
                 val y = avgY * imageHeight * scaleFactor + offsetY
@@ -448,6 +493,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             currentStrokePoints.clear()
             currentScreenPoints.clear()
             unpinchStartTime = 0L
+            isDebounceActive = false
             drawnPaths.clear()
             val indexX = indexTip.x() * imageWidth * scaleFactor + offsetX
             val indexY = indexTip.y() * imageHeight * scaleFactor + offsetY
@@ -465,6 +511,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             currentStrokePoints.clear()
             currentScreenPoints.clear()
             unpinchStartTime = 0L
+            isDebounceActive = false
             
             // Process fist clench clear gesture if enabled
             if (isFistClenchClearEnabled) {
@@ -578,8 +625,9 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             Log.d("OverlayView", "DOWN")
             // Start new path
             currentPath = Path()
-            val avgX = (indexTip.x() + thumbTip.x()) / 2f
-            val avgY = (indexTip.y() + thumbTip.y()) / 2f
+            val rawAvgX = (indexTip.x() + thumbTip.x()) / 2f
+            val rawAvgY = (indexTip.y() + thumbTip.y()) / 2f
+            val (avgX, avgY) = compensateDistortion(rawAvgX, rawAvgY)
             
             val x = avgX * imageWidth * scaleFactor + offsetX
             val y = avgY * imageHeight * scaleFactor + offsetY
@@ -587,6 +635,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             currentStrokePoints.clear()
             currentScreenPoints.clear()
             unpinchStartTime = 0L
+            isDebounceActive = false
             
             val scaledX = (avgX * imageWidth * scaleFactor) * coordinateScale + offsetX
             val scaledY = (avgY * imageHeight * scaleFactor) * coordinateScale + offsetY
@@ -594,27 +643,27 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             currentScreenPoints.add(ScreenPoint(x, y, nowTime))
          } else if (isWriting && ratio > STOP_THRESHOLD && (!isSendPose || sendPoseAchieved)) {
              var shouldStop = true
-             if (isMjpegMode) {
-                 if (unpinchStartTime == 0L) {
-                     unpinchStartTime = nowTime
-                 }
-                 if (nowTime - unpinchStartTime < MJPEG_UNPINCH_DEBOUNCE_MS) {
-                     shouldStop = false
-                 } else {
-                     // Real unpinch confirmed. Truncate points added during debounce
-                     currentStrokePoints.removeAll { it.timestamp >= unpinchStartTime }
-                     currentScreenPoints.removeAll { it.t >= unpinchStartTime }
-                     
-                     // Rebuild currentPath
-                     currentPath = Path()
-                     if (currentScreenPoints.isNotEmpty()) {
-                         currentPath?.moveTo(currentScreenPoints[0].x, currentScreenPoints[0].y)
-                         for (i in 1 until currentScreenPoints.size) {
-                             currentPath?.lineTo(currentScreenPoints[i].x, currentScreenPoints[i].y)
-                         }
-                     } else {
-                         currentPath = null
+             if (unpinchStartTime == 0L) {
+                 unpinchStartTime = nowTime
+             }
+             if (nowTime - unpinchStartTime < unpinchDebounceMs) {
+                 shouldStop = false
+                 isDebounceActive = true
+             } else {
+                 isDebounceActive = false
+                 // Real unpinch confirmed. Truncate points added during debounce
+                 currentStrokePoints.removeAll { it.timestamp >= unpinchStartTime }
+                 currentScreenPoints.removeAll { it.t >= unpinchStartTime }
+                 
+                 // Rebuild currentPath
+                 currentPath = Path()
+                 if (currentScreenPoints.isNotEmpty()) {
+                     currentPath?.moveTo(currentScreenPoints[0].x, currentScreenPoints[0].y)
+                     for (i in 1 until currentScreenPoints.size) {
+                         currentPath?.lineTo(currentScreenPoints[i].x, currentScreenPoints[i].y)
                      }
+                 } else {
+                     currentPath = null
                  }
              }
 
@@ -633,15 +682,18 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                      currentScreenPoints.clear()
                  }
                  unpinchStartTime = 0L
+                 isDebounceActive = false
              }
          }
         
         if (isWriting && !justStarted && !sendPoseAchieved) {
             if (ratio <= STOP_THRESHOLD) {
                 unpinchStartTime = 0L
+                isDebounceActive = false
             }
-            val avgX = (indexTip.x() + thumbTip.x()) / 2f
-            val avgY = (indexTip.y() + thumbTip.y()) / 2f
+            val rawAvgX = (indexTip.x() + thumbTip.x()) / 2f
+            val rawAvgY = (indexTip.y() + thumbTip.y()) / 2f
+            val (avgX, avgY) = compensateDistortion(rawAvgX, rawAvgY)
             
             val x = avgX * imageWidth * scaleFactor + offsetX
             val y = avgY * imageHeight * scaleFactor + offsetY
@@ -726,17 +778,18 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     companion object {
         private const val LANDMARK_STROKE_WIDTH = 8F
 
-        // Default Thresholds (Local camera)
+        // Constants
+        const val STOP_THRESHOLD = 0.90f
         const val START_THRESHOLD_DEFAULT = 0.20
         const val STOP_THRESHOLD_DEFAULT = 0.30
         const val STOP_THRESHOLD_TAP_DEFAULT = 0.26
 
-        // MJPEG Thresholds (Smart Glasses Classic mode)
+        // MJPEG Thresholds
         const val START_THRESHOLD_MJPEG = 0.20
         const val STOP_THRESHOLD_MJPEG = 0.35
         const val STOP_THRESHOLD_TAP_MJPEG = 0.26
 
-        // RTSP Thresholds (Lowered for responsiveness on RTSP stream)
+        // RTSP Thresholds (Lowered for responsiveness)
         const val START_THRESHOLD_RTSP = 0.15
         const val STOP_THRESHOLD_RTSP = 0.25
         const val STOP_THRESHOLD_TAP_RTSP = 0.20
