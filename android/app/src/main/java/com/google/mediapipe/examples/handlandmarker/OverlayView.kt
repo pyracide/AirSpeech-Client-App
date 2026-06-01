@@ -78,6 +78,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
     private var unpinchStartTime: Long = 0L
     var strokeListener: OnStrokeListener? = null
     private var lastClearTime = 0L
+    private val clearHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingClearRunnable: Runnable? = null
     private var tapCount = 0
     private var lastTapTime = 0L
     private val tapHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -317,6 +319,19 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                 centerDotPaint
             )
         }
+
+        // Draw Debounce Indicator
+        if (isDebugOverlayEnabled && isDebounceActive) {
+            val textPaint = Paint().apply {
+                color = Color.RED
+                textSize = 60f
+                textAlign = Paint.Align.RIGHT
+                isAntiAlias = true
+            }
+            val textX = offsetX + (imageWidth * scaleFactor) - 40f
+            val textY = offsetY + 80f
+            canvas.drawText("Debounce Active", textX, textY, textPaint)
+        }
     }
 
     fun setResults(
@@ -501,33 +516,22 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             return
         }
         
-        // If fist clench is active, drawing/writing is impossible.
-        if (isFistClenched) {
-            if (isWriting) {
-                isWriting = false
-                strokeListener?.onDrawingStateChanged(false)
-            }
-            currentPath = null
-            currentStrokePoints.clear()
-            currentScreenPoints.clear()
-            unpinchStartTime = 0L
-            isDebounceActive = false
-            
-            // Process fist clench clear gesture if enabled
-            if (isFistClenchClearEnabled) {
-                val currentTime = System.currentTimeMillis()
-                if (currentTime - lastClearTime > 1000) {
+        // Process fist clench clear gesture if enabled
+        if (isFistClenched && isFistClenchClearEnabled) {
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastClearTime > 1000 && pendingClearRunnable == null) {
+                pendingClearRunnable = Runnable {
                     clearDrawing()
                     strokeListener?.onClear()
-                    lastClearTime = currentTime
+                    lastClearTime = System.currentTimeMillis()
+                    pendingClearRunnable = null
                 }
+                clearHandler.postDelayed(pendingClearRunnable!!, 300)
             }
-            
-            val indexX = indexTip.x() * imageWidth * scaleFactor + offsetX
-            val indexY = indexTip.y() * imageHeight * scaleFactor + offsetY
-            strokeListener?.onDebugCoords(indexX, indexY)
-            return
         }
+        
+        // If fist clench is active, override ratio to act as "pen up"
+        val pinchRatio = if (isFistClenched) Float.MAX_VALUE else ratio
         
         // --- Pinch Detection (The "Pen") ---
         val START_THRESHOLD = when {
@@ -546,10 +550,18 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             else -> STOP_THRESHOLD_TAP_DEFAULT
         }
         
+        // Cancel pending clear if drawing is actively occurring or reinitiated
+        if (pinchRatio < START_THRESHOLD || (isWriting && pinchRatio <= STOP_THRESHOLD)) {
+            pendingClearRunnable?.let {
+                clearHandler.removeCallbacks(it)
+                pendingClearRunnable = null
+            }
+        }
+
         // --- Tap Gesture Detection (Double/Triple Pinch) ---
         // Use a separate release threshold so tap sensitivity can be tuned independently of pen-up.
         if (isTapGesturesEnabled) {
-            if (ratio < START_THRESHOLD && !isTapTriggered) {
+            if (pinchRatio < START_THRESHOLD && !isTapTriggered) {
                 isTapTriggered = true
                 val currentTime = System.currentTimeMillis()
                 if (currentTime - lastTapTime > 400) {
@@ -569,13 +581,13 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                 } else {
                     tapHandler.postDelayed(tapRunnable, 400)
                 }
-            } else if (ratio > STOP_THRESHOLD_TAP) {
+            } else if (pinchRatio > STOP_THRESHOLD_TAP) {
                 isTapTriggered = false
             }
         }
 
         // --- Send Pose Check for Debounce ---
-        val isSendPose = if (ratio <= STOP_THRESHOLD) {
+        val isSendPose = if (pinchRatio <= STOP_THRESHOLD) {
             false
         } else if (sendMode == 0) {
             // Third Person (Current) Mode
@@ -583,7 +595,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val ringExt = distance(ringTip, wrist) > distance(ringMCP, wrist) * 0.85f
             val pinkyExt = distance(pinkyTip, wrist) > distance(pinkyMCP, wrist) * 0.85f
             val fingersOpen = middleExt && ringExt && pinkyExt
-            val thumbIndexApart = ratio > 0.95
+            val thumbIndexApart = pinchRatio > 0.95
             fingersOpen && thumbIndexApart
         } else {
             // First Person Mode: 4 fingers straight + total straightness check
@@ -618,7 +630,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         // --- Pinch Detection (The "Pen" with Hysteresis) ---
         var justStarted = false
         val nowTime = System.currentTimeMillis()
-        if (!isWriting && ratio < START_THRESHOLD) {
+        if (!isWriting && pinchRatio < START_THRESHOLD) {
             isWriting = true
             strokeListener?.onDrawingStateChanged(true)
             justStarted = true
@@ -641,7 +653,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             val scaledY = (avgY * imageHeight * scaleFactor) * coordinateScale + offsetY
             currentStrokePoints.add(MyScriptService.PointData(scaledX, scaledY, nowTime))
             currentScreenPoints.add(ScreenPoint(x, y, nowTime))
-         } else if (isWriting && ratio > STOP_THRESHOLD && (!isSendPose || sendPoseAchieved)) {
+         } else if (isWriting && pinchRatio > STOP_THRESHOLD && (!isSendPose || sendPoseAchieved)) {
              var shouldStop = true
              if (unpinchStartTime == 0L) {
                  unpinchStartTime = nowTime
@@ -687,7 +699,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
          }
         
         if (isWriting && !justStarted && !sendPoseAchieved) {
-            if (ratio <= STOP_THRESHOLD) {
+            if (pinchRatio <= STOP_THRESHOLD) {
                 unpinchStartTime = 0L
                 isDebounceActive = false
             }
