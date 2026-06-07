@@ -156,17 +156,33 @@
         app:layout_constraintEnd_toEndOf="parent"/>
         
     <TextView
+        android:id="@+id/text_inference_indicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/glass_panel_bg"
+        android:padding="6dp"
+        android:textColor="#FFFFFF"
+        android:textSize="10sp"
+        android:text="Inf: -- ms (Avg: -- ms)"
+        android:visibility="visible"
+        app:layout_constraintTop_toBottomOf="@id/top_controls_row"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <TextView
         android:id="@+id/text_debug_coords"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="16dp"
         android:background="@drawable/glass_panel_bg"
         android:padding="8dp"
         android:textColor="#00FF00"
         android:textSize="14sp"
         android:text="X: 0, Y: 0"
         android:visibility="gone"
-        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/text_inference_indicator"
         app:layout_constraintEnd_toEndOf="parent"/>
         
     <TextView
@@ -203,7 +219,7 @@
         android:id="@+id/text_debounce_active"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="8dp"
         android:layout_marginEnd="16dp"
         android:background="@drawable/glass_panel_bg"
         android:padding="8dp"
@@ -212,8 +228,8 @@
         android:textStyle="bold"
         android:text="Debounce Active"
         android:visibility="gone"
-        app:layout_constraintTop_toTopOf="@id/view_finder"
-        app:layout_constraintEnd_toEndOf="@id/view_finder" />
+        app:layout_constraintTop_toBottomOf="@id/text_debug_coords"
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <LinearLayout
         android:id="@+id/top_controls_row"

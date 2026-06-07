@@ -356,6 +356,7 @@ class MyScriptService(private val context: Context, private val listener: Recogn
     }
 
     fun commitAndClear() {
+        val sendStartTime = System.currentTimeMillis()
         scope.launch(Dispatchers.Main) {
             // By launching on Main first, we queue this AFTER any pending addStroke events!
             withContext(Dispatchers.Default) {
@@ -372,11 +373,7 @@ class MyScriptService(private val context: Context, private val listener: Recogn
 
                 // 1. Export JIIX
                 val jiixString = offscreenEditor?.export_(emptyArray(), MimeType.JIIX)
-                val jiixElapsedTime = if (strokeStartTime > 0L) {
-                    System.currentTimeMillis() - strokeStartTime
-                } else {
-                    0L
-                }
+                val jiixElapsedTime = System.currentTimeMillis() - sendStartTime
                 strokeStartTime = 0L
                 
                 if (jiixString != null) {

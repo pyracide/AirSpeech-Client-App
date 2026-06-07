@@ -143,6 +143,12 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var ngWeight = 1.0f
     private var isDecoderDebugEnabled = false
     private var isJiixDebugEnabled = false
+    private var totalInferenceTime = 0L
+    private var inferenceCount = 0
+    private var lastInferenceTime = 0L
+    private var lastAverageInferenceTime = 0.0
+    private var isInferenceIndicatorEnabled = true
+    private var isHapticsEnabled = true
     private var decoderMode = MyScriptService.DecoderMode.LLM_RAW_TTS
     private var llmTimeoutMs = 1000L
     private var unpinchDebounceMs = 100L
@@ -269,6 +275,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         
         loadConnectionSettings()
         loadConfidenceSettings()
+        updateInferenceIndicator(0L, 0.0)
 
         // Push loaded overlay parameters to OverlayView
         fragmentCameraBinding.overlay.mjpegFingerStraightnessThreshold = mjpegFingerStraightnessThreshold
@@ -353,15 +360,25 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                            myScriptService?.strokeStartTime = 0L
                            return@runOnUiThread
                        }
+                       val filteredText = filterBoToTo(text)
+                       val filteredRawText = filterBoToTo(rawText)
+                       val filteredLlmText = filterBoToTo(llmText)
+
                        val capturedElapsedTimer = jiixElapsedTime
 
                        val displayText = if (myScriptService?.decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) {
-                           rawText
+                           filteredRawText
                        } else {
-                           text
+                           filteredText
                        }
                        fragmentCameraBinding.textRecognitionResult.text = displayText
                        fragmentCameraBinding.textTimerScore.text = "Timer: ${capturedElapsedTimer} ms"
+
+                       lastInferenceTime = capturedElapsedTimer
+                       totalInferenceTime += capturedElapsedTimer
+                       inferenceCount++
+                       lastAverageInferenceTime = totalInferenceTime.toDouble() / inferenceCount
+                       updateInferenceIndicator(lastInferenceTime, lastAverageInferenceTime)
 
                        val timerLabel = "Recognition Latency: ${capturedElapsedTimer} ms"
                        val finalDebug = if (debugText.isNotEmpty()) {
@@ -380,9 +397,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                        // Speak only if drawing mode is active and text is not empty
                        if (isDrawingMode) {
                            val textToSpeak = if (myScriptService?.decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) {
-                               rawText
+                               filteredRawText
                            } else {
-                               text
+                               filteredText
                            }
                            if (textToSpeak.isNotBlank()) {
                                tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "UtteranceId")
@@ -390,7 +407,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                        }
 
                        // Capture and upload the inkPreview strip for user testing data collection
-                       if (isSmartGlassesMode && rawText.isNotBlank()) {
+                       if (isSmartGlassesMode && filteredRawText.isNotBlank()) {
                            val view = fragmentCameraBinding.inkPreview
                            view.post {
                                if (view.width > 0 && view.height > 0) {
@@ -404,9 +421,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                                        prefs.edit().putInt("last_image_num", currentImageNum).apply()
 
                                        val versionStr = if (currentStreamMode == MODE_CLASSIC) "MINI" else "PRO"
-                                       val sanitizedRaw = sanitizeFilenamePart(rawText)
-                                       val llmPart = if ((myScriptService?.decoderMode == MyScriptService.DecoderMode.LLM || myScriptService?.decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) && llmText.isNotBlank()) {
-                                           "_" + sanitizeFilenamePart(llmText)
+                                       val sanitizedRaw = sanitizeFilenamePart(filteredRawText)
+                                       val llmPart = if ((myScriptService?.decoderMode == MyScriptService.DecoderMode.LLM || myScriptService?.decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) && filteredLlmText.isNotBlank()) {
+                                           "_" + sanitizeFilenamePart(filteredLlmText)
                                        } else {
                                            ""
                                        }
@@ -906,6 +923,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     }
     
     private fun enableSmartGlasses(url: String, mode: Int) {
+        resetAverageInferenceTime()
         isSmartGlassesMode = true
         currentStreamMode = mode
         applyMirroringState()
@@ -1198,6 +1216,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             putBoolean("is_rtsp_mirrored", isRtspMirrored)
             putLong("unpinch_debounce", unpinchDebounceMs)
             putFloat("lens_distortion_k1", lensDistortionK1)
+            putBoolean("is_inference_indicator_enabled", isInferenceIndicatorEnabled)
+            putBoolean("is_haptics_enabled", isHapticsEnabled)
             apply()
         }
     }
@@ -1211,6 +1231,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         isRtspMirrored = prefs.getBoolean("is_rtsp_mirrored", false)
         unpinchDebounceMs = prefs.getLong("unpinch_debounce", 100L)
         lensDistortionK1 = prefs.getFloat("lens_distortion_k1", 0f)
+        isInferenceIndicatorEnabled = prefs.getBoolean("is_inference_indicator_enabled", true)
+        isHapticsEnabled = prefs.getBoolean("is_haptics_enabled", true)
+        udpHapticController.isEnabled = isHapticsEnabled
     }
 
     private fun saveConfidenceSettings() {
@@ -1325,6 +1348,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     }
     
     private fun disableSmartGlasses() {
+        resetAverageInferenceTime()
         isSmartGlassesMode = false
         // 1. Disconnect
         smartGlassesService?.disconnect()
@@ -1364,6 +1388,39 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         fragmentCameraBinding.btnSmartGlasses.clearColorFilter()
 
         saveConnectionSettings()
+    }
+
+    private fun resetAverageInferenceTime() {
+        totalInferenceTime = 0L
+        inferenceCount = 0
+        lastInferenceTime = 0L
+        lastAverageInferenceTime = 0.0
+        updateInferenceIndicator(0L, 0.0)
+    }
+
+    private fun updateInferenceIndicator(elapsed: Long, avg: Double) {
+        if (!isAdded || _fragmentCameraBinding == null) return
+        if (isInferenceIndicatorEnabled) {
+            if (inferenceCount == 0) {
+                fragmentCameraBinding.textInferenceIndicator.text = "Inf: -- ms (Avg: -- ms)"
+            } else {
+                fragmentCameraBinding.textInferenceIndicator.text = String.format(Locale.US, "Inf: %d ms (Avg: %.1f ms)", elapsed, avg)
+            }
+            fragmentCameraBinding.textInferenceIndicator.visibility = View.VISIBLE
+        } else {
+            fragmentCameraBinding.textInferenceIndicator.visibility = View.GONE
+        }
+    }
+
+    private fun filterBoToTo(input: String): String {
+        return input.split(Regex("(?<=\\b)|(?=\\b)")).joinToString("") { word ->
+            when (word) {
+                "bo" -> "to"
+                "Bo" -> "To"
+                "BO" -> "TO"
+                else -> word
+            }
+        }
     }
     
     private fun showSettingsDialog() {
@@ -1684,6 +1741,20 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             } else {
                 fragmentCameraBinding.jiixDebugView.dismiss()
             }
+        }
+
+        bottomSheetBinding!!.inferenceTimeSwitch.isChecked = isInferenceIndicatorEnabled
+        bottomSheetBinding!!.inferenceTimeSwitch.setOnCheckedChangeListener { _, isChecked ->
+            isInferenceIndicatorEnabled = isChecked
+            saveConnectionSettings()
+            updateInferenceIndicator(lastInferenceTime, lastAverageInferenceTime)
+        }
+
+        bottomSheetBinding!!.hapticsSwitch.isChecked = isHapticsEnabled
+        bottomSheetBinding!!.hapticsSwitch.setOnCheckedChangeListener { _, isChecked ->
+            isHapticsEnabled = isChecked
+            udpHapticController.isEnabled = isChecked
+            saveConnectionSettings()
         }
 
         bottomSheetBinding!!.udpTargetPcSwitch.isChecked = isUdpTargetPc

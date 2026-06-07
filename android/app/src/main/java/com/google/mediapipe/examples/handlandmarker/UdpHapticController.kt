@@ -21,6 +21,7 @@ class UdpHapticController(private val onStatus: ((String) -> Unit)? = null) {
     var isDrawingMode = true
     private var isWriting = false
     private var lastDrawingTime = 0L
+    var isEnabled = true
     
     init {
         scope.launch {
@@ -110,6 +111,10 @@ class UdpHapticController(private val onStatus: ((String) -> Unit)? = null) {
     }
     
     private fun sendPacket(message: String) {
+        if (!isEnabled) {
+            onStatus?.invoke("Muted (Haptics Disabled)")
+            return
+        }
         if (targetIp.isEmpty() || socket == null) {
             val reason = "targetIp: '$targetIp', socketInitialized: ${socket != null}"
             Log.w("UdpHaptic", "Skipping packet send. $reason")
