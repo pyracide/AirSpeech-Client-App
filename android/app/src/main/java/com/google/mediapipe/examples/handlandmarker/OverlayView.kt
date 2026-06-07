@@ -704,6 +704,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             if (pinchRatio <= STOP_THRESHOLD) {
                 unpinchStartTime = 0L
                 isDebounceActive = false
+            } else {
+                if (unpinchStartTime == 0L) {
+                    unpinchStartTime = nowTime
+                }
             }
             val x = avgX * imageWidth * scaleFactor + offsetX
             val y = avgY * imageHeight * scaleFactor + offsetY
@@ -724,6 +728,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                       isWriting = false
                       strokeListener?.onDrawingStateChanged(false)
                       Log.d("OverlayView", "UP (Send)")
+                      if (unpinchStartTime != 0L) {
+                          currentStrokePoints.removeAll { it.timestamp >= unpinchStartTime }
+                          currentScreenPoints.removeAll { it.t >= unpinchStartTime }
+                      }
                       currentPath?.let { drawnPaths.add(it) }
                       currentPath = null
                       if (currentStrokePoints.isNotEmpty()) {
@@ -736,6 +744,8 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                   strokeListener?.onSend()
                   lastClearTime = currentTime
                   sendPoseStartTime = 0L
+                  unpinchStartTime = 0L
+                  isDebounceActive = false
              }
         }
         

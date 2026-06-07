@@ -175,13 +175,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private val bufferLock = Any()
     private var pixelCopyThread: android.os.HandlerThread? = null
     private var pixelCopyHandler: android.os.Handler? = null
-    
-    // Jitter Buffer / Pacer
-    private var isJitterBufferEnabled = false
-    private val pacerQueue = java.util.LinkedList<Bitmap>()
-    private val pacerPool = java.util.LinkedList<Bitmap>()
-    private val pacerHandler = Handler(Looper.getMainLooper())
-    private var pacerRunnable: Runnable? = null
+
 
     /** Blocking ML operations are performed using this executor */
     private lateinit var backgroundExecutor: ExecutorService
@@ -676,51 +670,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         updateDebugOverlaysVisibility()
     }
 
-    private fun startPacerIfNeeded() {
-        if (pacerRunnable != null) return
-        
-        pacerRunnable = object : Runnable {
-            override fun run() {
-                if (!isJitterBufferEnabled || pacerQueue.isEmpty()) {
-                    pacerRunnable = null
-                    return
-                }
 
-                if (isProcessingFrame.compareAndSet(false, true)) {
-                    val bitmapToProcess = synchronized(bufferLock) {
-                        if (pacerQueue.isNotEmpty()) pacerQueue.removeFirst() else null
-                    }
-
-                    if (bitmapToProcess != null) {
-                        backgroundExecutor.execute {
-                            try {
-                                if (!isBlinking) {
-                                    handLandmarkerHelper.detectLiveStreamBitmap(bitmapToProcess, isSmartGlassesFlipped, isCurrentModeMirrored)
-                                }
-                                // Return the bitmap to the pool when done
-                                synchronized(bufferLock) {
-                                    pacerPool.add(bitmapToProcess)
-                                }
-                                isProcessingFrame.set(false)
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error in pacer processing", e)
-                                synchronized(bufferLock) {
-                                    pacerPool.add(bitmapToProcess)
-                                }
-                                isProcessingFrame.set(false)
-                            }
-                        }
-                    } else {
-                        isProcessingFrame.set(false)
-                    }
-                }
-                
-                pacerHandler.postDelayed(this, 33) // Steady 30fps pacing
-            }
-        }
-        pacerHandler.post(pacerRunnable!!)
-    }
-    
     private fun toggleSmartGlassesMode() {
         if (!isSmartGlassesMode) {
             // Enable Smart Glasses Mode
@@ -1027,31 +977,6 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     }
 
     private fun triggerInference() {
-        if (isJitterBufferEnabled) {
-            // Smooth Mode: Add to queue using pointer swapping (Zero Allocation)
-            synchronized(bufferLock) {
-                if (isNewFrameReady) {
-                    bufferReady?.let { source ->
-                        // Get a spare bitmap from the pool
-                        val pacedBitmap = if (pacerPool.isNotEmpty()) pacerPool.removeFirst() else Bitmap.createBitmap(source)
-                        
-                        // Copy the pixels efficiently (still faster than createBitmap)
-                        val canvas = android.graphics.Canvas(pacedBitmap)
-                        canvas.drawBitmap(source, 0f, 0f, null)
-                        
-                        pacerQueue.add(pacedBitmap)
-                        // Keep queue small to prevent excessive latency (max 3 frames ~100ms)
-                        while (pacerQueue.size > 3) {
-                            pacerPool.add(pacerQueue.removeFirst())
-                        }
-                    }
-                    isNewFrameReady = false
-                }
-            }
-            startPacerIfNeeded()
-            return
-        }
-
         if (isProcessingFrame.compareAndSet(false, true)) {
             synchronized(bufferLock) {
                 if (!isNewFrameReady) {
@@ -1954,15 +1879,6 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             }
 
 
-        
-        bottomSheetBinding!!.jitterBufferSwitch.setOnCheckedChangeListener { _, isChecked ->
-            isJitterBufferEnabled = isChecked
-            if (!isChecked) {
-                synchronized(bufferLock) {
-                    pacerQueue.clear()
-                }
-            }
-        }
         
         bottomSheetBinding!!.tapGesturesSwitch.isChecked = fragmentCameraBinding.overlay.isTapGesturesEnabled
         bottomSheetBinding!!.tapGesturesSwitch.setOnCheckedChangeListener { _, isChecked ->
