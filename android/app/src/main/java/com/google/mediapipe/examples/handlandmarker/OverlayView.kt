@@ -125,6 +125,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         fun onHandPresence(detected: Boolean)
         fun onAbort()
         fun onDrawingStateChanged(isWriting: Boolean)
+        fun onHandMoved(avgX: Float, avgY: Float) {}
         fun onPinchDebug(scaleDist: Float, pinchDist: Float, ratio: Float) {}
         fun onFistClenchDebug(isFistClenched: Boolean) {}
     }
@@ -473,6 +474,10 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         val pinkyMCP = landmarks[17]
         val pinkyTip = landmarks[20]
         
+        val rawAvgX = (indexTip.x() + thumbTip.x()) / 2f
+        val rawAvgY = (indexTip.y() + thumbTip.y()) / 2f
+        val (avgX, avgY) = compensateDistortion(rawAvgX, rawAvgY)
+        
         val scaleDist = distance(wrist, indexMCP)
         val pinchDist = distance(thumbTip, indexTip)
         val ratio = if (scaleDist > 0) pinchDist / scaleDist else 100f // prevent div by zero
@@ -637,9 +642,6 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
             Log.d("OverlayView", "DOWN")
             // Start new path
             currentPath = Path()
-            val rawAvgX = (indexTip.x() + thumbTip.x()) / 2f
-            val rawAvgY = (indexTip.y() + thumbTip.y()) / 2f
-            val (avgX, avgY) = compensateDistortion(rawAvgX, rawAvgY)
             
             val x = avgX * imageWidth * scaleFactor + offsetX
             val y = avgY * imageHeight * scaleFactor + offsetY
@@ -703,10 +705,6 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
                 unpinchStartTime = 0L
                 isDebounceActive = false
             }
-            val rawAvgX = (indexTip.x() + thumbTip.x()) / 2f
-            val rawAvgY = (indexTip.y() + thumbTip.y()) / 2f
-            val (avgX, avgY) = compensateDistortion(rawAvgX, rawAvgY)
-            
             val x = avgX * imageWidth * scaleFactor + offsetX
             val y = avgY * imageHeight * scaleFactor + offsetY
             currentPath?.lineTo(x, y)
@@ -745,6 +743,7 @@ class OverlayView(context: Context?, attrs: AttributeSet?) :
         val indexX = indexTip.x() * imageWidth * scaleFactor + offsetX
         val indexY = indexTip.y() * imageHeight * scaleFactor + offsetY
         strokeListener?.onDebugCoords(indexX, indexY)
+        strokeListener?.onHandMoved(avgX, avgY)
     }
     
     private fun distance(p1: NormalizedLandmark, p2: NormalizedLandmark): Float {

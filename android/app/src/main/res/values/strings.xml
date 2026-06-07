@@ -95,4 +95,14 @@
         <item>Third Person (Classic)</item>
         <item>First Person (Straight Fingers)</item>
     </string-array>
+
+    <string-array name="haptic_preset_titles">
+        <item>#1 Strong Click (Default)</item>
+        <item>#4 Sharp Click (Ballpoint Pen)</item>
+        <item>#7 Soft Bump (Pencil on Paper)</item>
+        <item>#24 Sharp Tick (Fine Stylus Nib)</item>
+        <item>#34 Double Sharp Tick (Sketching Texture)</item>
+        <item>#13 Soft Fuzz (Wet Brush Stroke)</item>
+        <item>#119 Smooth Hum (Fluid Calligraphy)</item>
+    </string-array>
 </resources>

@@ -1071,6 +1071,33 @@
                 android:checked="false" />
         </RelativeLayout>
 
+        <!-- Haptic Engine Parameters Submenu Button -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/bottom_sheet_default_row_margin">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:text="Haptic Texture Settings"
+                android:textColor="@color/bottom_sheet_text_color"
+                android:textSize="@dimen/bottom_sheet_text_size" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btn_haptic_engine_settings"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_alignParentRight="true"
+                android:layout_centerVertical="true"
+                android:text="Configure"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:background="@drawable/glass_button_bg"
+                app:backgroundTint="@null" />
+        </RelativeLayout>
+
         <!-- Delegate selection row -->
         <RelativeLayout
             android:layout_width="match_parent"

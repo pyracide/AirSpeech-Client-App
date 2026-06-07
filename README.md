@@ -24,3 +24,4 @@ myscript-iink-android-sdk (will require a license from MyScript)
 io.ktor:ktor-client-core
 io.ktor:ktor-client-websockets
 
+By Sam Gray

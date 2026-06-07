@@ -50,6 +50,7 @@ import com.google.mediapipe.examples.handlandmarker.UdpHapticController
 import com.google.mediapipe.examples.handlandmarker.H264Decoder
 import com.google.mediapipe.examples.handlandmarker.databinding.FragmentCameraBinding
 import com.google.mediapipe.examples.handlandmarker.databinding.InfoBottomSheetBinding
+import com.google.mediapipe.examples.handlandmarker.databinding.DialogHapticSettingsBinding
 import android.content.Context
 import android.graphics.Canvas
 import com.google.mediapipe.examples.handlandmarker.myscript.Item
@@ -569,6 +570,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             }
             override fun onDrawingStateChanged(isWriting: Boolean) {
                 udpHapticController.onDrawingStateChanged(isWriting)
+            }
+            override fun onHandMoved(avgX: Float, avgY: Float) {
+                udpHapticController.onHandMoved(avgX, avgY)
             }
             override fun onPinchDebug(scaleDist: Float, pinchDist: Float, ratio: Float) {
                 activity?.runOnUiThread {
@@ -1234,6 +1238,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         isInferenceIndicatorEnabled = prefs.getBoolean("is_inference_indicator_enabled", true)
         isHapticsEnabled = prefs.getBoolean("is_haptics_enabled", true)
         udpHapticController.isEnabled = isHapticsEnabled
+        udpHapticController.loadSettings(requireContext())
     }
 
     private fun saveConfidenceSettings() {
@@ -1432,6 +1437,130 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         }
         updateControlsUi()
         settingsDialog?.show()
+    }
+
+    private val hapticPresetValues = listOf(1, 4, 7, 24, 34, 13, 119)
+
+    private fun showHapticSettingsDialog() {
+        val hapticDialog = BottomSheetDialog(requireContext(), R.style.BottomSheetDialogTheme)
+        val hapticBinding = DialogHapticSettingsBinding.inflate(layoutInflater)
+        hapticDialog.setContentView(hapticBinding.root)
+
+        fun updateHapticDialogUi() {
+            hapticBinding.textMinPeriodValue.text = "${udpHapticController.minPeriod} ms"
+            hapticBinding.textMaxPeriodValue.text = "${udpHapticController.maxPeriod} ms"
+            hapticBinding.textSpeedLowValue.text = "${udpHapticController.speedLow} u/s"
+            hapticBinding.textSpeedHighValue.text = "${udpHapticController.speedHigh} u/s"
+            hapticBinding.textSmoothingValue.text = "${udpHapticController.smoothingWindow} ms"
+            hapticBinding.textDecayValue.text = "${(udpHapticController.decay * 100 + 0.5f).toInt()}%"
+            hapticBinding.textHysteresisValue.text = "${udpHapticController.hysteresis} ms"
+            hapticBinding.textWatchdogValue.text = "${udpHapticController.watchdogTimeout} ms"
+            hapticBinding.spinnerHapticPreset.setSelection(hapticPresetValues.indexOf(udpHapticController.drawPreset).coerceAtLeast(0), false)
+        }
+
+        hapticBinding.btnMinPeriodMinus.setOnClickListener {
+            udpHapticController.minPeriod = (udpHapticController.minPeriod - 5).coerceAtLeast(30)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+        hapticBinding.btnMinPeriodPlus.setOnClickListener {
+            udpHapticController.minPeriod = (udpHapticController.minPeriod + 5).coerceAtMost(300)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+
+        hapticBinding.btnMaxPeriodMinus.setOnClickListener {
+            udpHapticController.maxPeriod = (udpHapticController.maxPeriod - 20).coerceAtLeast(200)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+        hapticBinding.btnMaxPeriodPlus.setOnClickListener {
+            udpHapticController.maxPeriod = (udpHapticController.maxPeriod + 20).coerceAtMost(2000)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+
+        hapticBinding.btnSpeedLowMinus.setOnClickListener {
+            udpHapticController.speedLow = (udpHapticController.speedLow - 5).coerceAtLeast(5)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+        hapticBinding.btnSpeedLowPlus.setOnClickListener {
+            udpHapticController.speedLow = (udpHapticController.speedLow + 5).coerceAtMost(200)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+
+        hapticBinding.btnSpeedHighMinus.setOnClickListener {
+            udpHapticController.speedHigh = (udpHapticController.speedHigh - 10).coerceAtLeast(100)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+        hapticBinding.btnSpeedHighPlus.setOnClickListener {
+            udpHapticController.speedHigh = (udpHapticController.speedHigh + 10).coerceAtMost(2000)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+
+        hapticBinding.btnSmoothingMinus.setOnClickListener {
+            udpHapticController.smoothingWindow = (udpHapticController.smoothingWindow - 10).coerceAtLeast(30)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+        hapticBinding.btnSmoothingPlus.setOnClickListener {
+            udpHapticController.smoothingWindow = (udpHapticController.smoothingWindow + 10).coerceAtMost(500)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+
+        hapticBinding.btnDecayMinus.setOnClickListener {
+            udpHapticController.decay = (udpHapticController.decay - 0.05f).coerceAtLeast(0.30f)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+        hapticBinding.btnDecayPlus.setOnClickListener {
+            udpHapticController.decay = (udpHapticController.decay + 0.05f).coerceAtMost(0.99f)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+
+        hapticBinding.btnHysteresisMinus.setOnClickListener {
+            udpHapticController.hysteresis = (udpHapticController.hysteresis - 1).coerceAtLeast(0)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+        hapticBinding.btnHysteresisPlus.setOnClickListener {
+            udpHapticController.hysteresis = (udpHapticController.hysteresis + 1).coerceAtMost(100)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+
+        hapticBinding.btnWatchdogMinus.setOnClickListener {
+            udpHapticController.watchdogTimeout = (udpHapticController.watchdogTimeout - 5).coerceAtLeast(30)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+        hapticBinding.btnWatchdogPlus.setOnClickListener {
+            udpHapticController.watchdogTimeout = (udpHapticController.watchdogTimeout + 5).coerceAtMost(500)
+            udpHapticController.saveSettings(requireContext())
+            updateHapticDialogUi()
+        }
+
+        hapticBinding.spinnerHapticPreset.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                udpHapticController.drawPreset = hapticPresetValues[position]
+                udpHapticController.saveSettings(requireContext())
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        hapticBinding.btnResetHapticsDefaults.setOnClickListener {
+            udpHapticController.resetToDefaults(requireContext())
+            updateHapticDialogUi()
+        }
+
+        updateHapticDialogUi()
+        hapticDialog.show()
     }
     
     override fun onInit(status: Int) {
@@ -1868,6 +1997,10 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 fragmentCameraBinding.overlay.sendMode = position
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        bottomSheetBinding!!.btnHapticEngineSettings.setOnClickListener {
+            showHapticSettingsDialog()
         }
     }
 
