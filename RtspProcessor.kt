@@ -107,7 +107,7 @@ class RtspProcessor(
      * If SPS frame param num_ref_frames is equal to 1 or more, set it to 0. That should decrease
      * decoder latency by 2x times on some hardware decoders.
      */
-    var experimentalUpdateSpsFrameWithLowLatencyParams = true
+    var experimentalUpdateSpsFrameWithLowLatencyParams = false
 
     /**
      * Enables the playback smoothing logic inside the video decoder.
