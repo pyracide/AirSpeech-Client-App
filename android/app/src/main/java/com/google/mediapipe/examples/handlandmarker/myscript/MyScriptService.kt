@@ -138,7 +138,7 @@ class MyScriptService(private val context: Context, private val listener: Recogn
         languageModel.isDebugMode = enabled
     }
     
-    var decoderMode = DecoderMode.LLM_RAW_TTS
+    var decoderMode = DecoderMode.NONE
     var llmScalingMode = 0 // 0=Basic, 1=Softmax, 2=Off
     var oneWordOnly = true
     private var isDebugEnabled = false

@@ -49,6 +49,7 @@ import com.google.mediapipe.examples.handlandmarker.SmartGlassesStreamService
 import com.google.mediapipe.examples.handlandmarker.UdpHapticController
 import com.google.mediapipe.examples.handlandmarker.H264Decoder
 import com.google.mediapipe.examples.handlandmarker.databinding.FragmentCameraBinding
+import com.google.mediapipe.examples.handlandmarker.LatencyConfig
 import com.google.mediapipe.examples.handlandmarker.databinding.InfoBottomSheetBinding
 import com.google.mediapipe.examples.handlandmarker.databinding.DialogHapticSettingsBinding
 import android.content.Context
@@ -67,6 +68,7 @@ import android.os.Handler
 import android.os.Looper
 import com.alexvas.rtsp.widget.RtspSurfaceView
 import com.alexvas.rtsp.widget.RtspStatusListener
+import com.alexvas.rtsp.widget.RtspProcessor
 
 class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, TextToSpeech.OnInitListener {
 
@@ -150,7 +152,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var lastAverageInferenceTime = 0.0
     private var isInferenceIndicatorEnabled = true
     private var isHapticsEnabled = true
-    private var decoderMode = MyScriptService.DecoderMode.LLM_RAW_TTS
+    private var decoderMode = MyScriptService.DecoderMode.NONE
     private var llmTimeoutMs = 1000L
     private var unpinchDebounceMs = 100L
     private var llmModelIndex = 0
@@ -161,6 +163,10 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var isLandmarkInDrawModeEnabled = false
     private var mjpegFingerStraightnessThreshold = 0.78f
     private var mjpegTotalStraightnessThreshold = 3.40f
+    
+    private var rtspFrameBufferCapacity = 60
+    private var rtspLowLatencySpsRewrite = false
+    private var rtspPollingDelayMs = 33L
     
     private val camFpsQueue = java.util.ArrayDeque<Long>()
     private val mpFpsQueue = java.util.ArrayDeque<Long>()
@@ -454,7 +460,6 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         myScriptService?.llmTimeoutMs = llmTimeoutMs
         myScriptService?.setLlmModelIndex(llmModelIndex)
         myScriptService?.llmScalingMode = llmScalingMode
-        myScriptService?.preloadLlm()
         
         fragmentCameraBinding.overlay.strokeListener = object : OverlayView.OnStrokeListener {
             override fun onStroke(points: List<MyScriptService.PointData>) {
@@ -1006,6 +1011,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     }
 
     private fun setupRtspPlayer(url: String) {
+        val prefs = context?.getSharedPreferences("connection_settings", Context.MODE_PRIVATE)
+        prefs?.edit()?.putBoolean("connection_in_progress", true)?.apply()
+
         // We use the new RtspSurfaceView
         fragmentCameraBinding.smartGlassesRtspView.apply {
             // API 5.6.4 expects a Uri
@@ -1032,6 +1040,8 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
 
                 override fun onRtspStatusConnected() {
                     Log.d(TAG, "RTSP Connected to $url")
+                    val currentPrefs = context?.getSharedPreferences("connection_settings", Context.MODE_PRIVATE)
+                    currentPrefs?.edit()?.putBoolean("connection_in_progress", false)?.apply()
                     cancelRtspReconnect()
                 }
 
@@ -1075,8 +1085,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     }
 
     private fun reinitScraperBitmaps() {
+        if (!isSmartGlassesMode || currentStreamMode != MODE_H264_RTSP || !isAdded) return
+        
         val view = fragmentCameraBinding.smartGlassesRtspView
-        // Use the layout dimensions to get the correct aspect ratio
         val layoutWidth = view.width
         val layoutHeight = view.height
         
@@ -1085,18 +1096,23 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             val targetH = scraperTargetHeight
             val targetW = (targetH * ratio).toInt()
             
-            Log.d(TAG, "Initializing scraper bitmaps at $targetW x $targetH (Target ${targetH}p)")
-            
             synchronized(bufferLock) {
-                // Safely re-create the bitmaps
-                bufferWriting = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
-                bufferReady = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
-                bufferReading = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+                // Only create new bitmaps if size has changed or they are null
+                if (bufferWriting == null || bufferWriting!!.width != targetW || bufferWriting!!.height != targetH) {
+                    Log.d(TAG, "Initializing scraper bitmaps at $targetW x $targetH (Target ${targetH}p)")
+                    bufferWriting = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+                    bufferReady = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+                    bufferReading = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888)
+                }
                 isNewFrameReady = false
             }
         } else {
-            // Fallback if view not laid out yet - retry in a bit
-            view.post { reinitScraperBitmaps() }
+            // Fallback if view not laid out yet - retry in a bit, but only if view is still active
+            view.post { 
+                if (isAdded && isSmartGlassesMode && currentStreamMode == MODE_H264_RTSP) {
+                    reinitScraperBitmaps()
+                }
+            }
         }
     }
 
@@ -1112,13 +1128,16 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                         handleDecodedFrame(surface)
                     }
                 }
-                processingHandler.postDelayed(this, 33) // ~30fps polling
+                processingHandler.postDelayed(this, rtspPollingDelayMs)
             }
         }
         processingHandler.post(processingRunnable!!)
     }
 
     private fun releaseRtspPlayer() {
+        val prefs = context?.getSharedPreferences("connection_settings", Context.MODE_PRIVATE)
+        prefs?.edit()?.putBoolean("connection_in_progress", false)?.apply()
+        
         cancelRtspReconnect()
         fragmentCameraBinding.smartGlassesRtspView.stop()
         processingRunnable?.let { processingHandler.removeCallbacks(it) }
@@ -1147,15 +1166,35 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             putFloat("lens_distortion_k1", lensDistortionK1)
             putBoolean("is_inference_indicator_enabled", isInferenceIndicatorEnabled)
             putBoolean("is_haptics_enabled", isHapticsEnabled)
+            putInt("rtsp_frame_buffer_capacity", rtspFrameBufferCapacity)
+            putBoolean("rtsp_low_latency_sps_rewrite", rtspLowLatencySpsRewrite)
+            putLong("rtsp_polling_delay", rtspPollingDelayMs)
             apply()
         }
     }
 
     private fun loadConnectionSettings() {
         val prefs = requireContext().getSharedPreferences("connection_settings", Context.MODE_PRIVATE)
+        
+        // Crash recovery sentinel
+        val connectionInProgress = prefs.getBoolean("connection_in_progress", false)
+        val savedIsSmartGlassesMode = prefs.getBoolean("is_smart_glasses_mode", false)
+        if (connectionInProgress && savedIsSmartGlassesMode) {
+            prefs.edit().apply {
+                putBoolean("is_smart_glasses_mode", false)
+                putBoolean("connection_in_progress", false)
+                apply()
+            }
+            isSmartGlassesMode = false
+            activity?.runOnUiThread {
+                Toast.makeText(context, "RTSP connection crashed last session. Disabling for recovery.", Toast.LENGTH_LONG).show()
+            }
+        } else {
+            isSmartGlassesMode = savedIsSmartGlassesMode
+        }
+
         lastSocketUrl = prefs.getString("last_socket_url", "ws://192.168.1.65:81") ?: "ws://192.168.1.65:81"
         currentStreamMode = prefs.getInt("current_stream_mode", MODE_CLASSIC)
-        isSmartGlassesMode = prefs.getBoolean("is_smart_glasses_mode", false)
         isMjpegMirrored = prefs.getBoolean("is_mjpeg_mirrored", false)
         isRtspMirrored = prefs.getBoolean("is_rtsp_mirrored", false)
         unpinchDebounceMs = prefs.getLong("unpinch_debounce", 100L)
@@ -1164,6 +1203,11 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         isHapticsEnabled = prefs.getBoolean("is_haptics_enabled", true)
         udpHapticController.isEnabled = isHapticsEnabled
         udpHapticController.loadSettings(requireContext())
+        rtspFrameBufferCapacity = prefs.getInt("rtsp_frame_buffer_capacity", 60)
+        rtspLowLatencySpsRewrite = prefs.getBoolean("rtsp_low_latency_sps_rewrite", false)
+        rtspPollingDelayMs = prefs.getLong("rtsp_polling_delay", 33L)
+        LatencyConfig.customFrameBufferCapacity = rtspFrameBufferCapacity
+        LatencyConfig.customLowLatencySpsRewrite = rtspLowLatencySpsRewrite
     }
 
     private fun saveConfidenceSettings() {
@@ -1486,6 +1530,71 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
 
         updateHapticDialogUi()
         hapticDialog.show()
+    }
+
+    private fun applyLatencyRefinementsRealTime() {
+        LatencyConfig.customFrameBufferCapacity = rtspFrameBufferCapacity
+        LatencyConfig.customLowLatencySpsRewrite = rtspLowLatencySpsRewrite
+        if (isSmartGlassesMode && currentStreamMode == MODE_H264_RTSP) {
+            releaseRtspPlayer()
+            setupRtspPlayer(lastSocketUrl)
+        }
+    }
+
+    private fun showLatencySettingsDialog() {
+        val latencyDialog = BottomSheetDialog(requireContext(), R.style.BottomSheetDialogTheme)
+        val latencyBinding = com.google.mediapipe.examples.handlandmarker.databinding.DialogLatencySettingsBinding.inflate(layoutInflater)
+        latencyDialog.setContentView(latencyBinding.root)
+
+        fun updateLatencyDialogUi() {
+            latencyBinding.textRtspBufferValue.text = "${rtspFrameBufferCapacity} frames"
+            latencyBinding.switchSpsRewrite.isChecked = rtspLowLatencySpsRewrite
+            latencyBinding.textPollingDelayValue.text = "${rtspPollingDelayMs} ms"
+        }
+
+        latencyBinding.btnRtspBufferMinus.setOnClickListener {
+            rtspFrameBufferCapacity = (rtspFrameBufferCapacity - 5).coerceAtLeast(5)
+            updateLatencyDialogUi()
+            applyLatencyRefinementsRealTime()
+            saveConnectionSettings()
+        }
+
+        latencyBinding.btnRtspBufferPlus.setOnClickListener {
+            rtspFrameBufferCapacity = (rtspFrameBufferCapacity + 5).coerceAtMost(150)
+            updateLatencyDialogUi()
+            applyLatencyRefinementsRealTime()
+            saveConnectionSettings()
+        }
+
+        latencyBinding.switchSpsRewrite.setOnCheckedChangeListener { _, isChecked ->
+            rtspLowLatencySpsRewrite = isChecked
+            applyLatencyRefinementsRealTime()
+            saveConnectionSettings()
+        }
+
+        latencyBinding.btnPollingDelayMinus.setOnClickListener {
+            rtspPollingDelayMs = (rtspPollingDelayMs - 3).coerceAtLeast(3)
+            updateLatencyDialogUi()
+            saveConnectionSettings()
+        }
+
+        latencyBinding.btnPollingDelayPlus.setOnClickListener {
+            rtspPollingDelayMs = (rtspPollingDelayMs + 3).coerceAtMost(99)
+            updateLatencyDialogUi()
+            saveConnectionSettings()
+        }
+
+        latencyBinding.btnResetLatencyDefaults.setOnClickListener {
+            rtspFrameBufferCapacity = 60
+            rtspLowLatencySpsRewrite = false
+            rtspPollingDelayMs = 33L
+            updateLatencyDialogUi()
+            applyLatencyRefinementsRealTime()
+            saveConnectionSettings()
+        }
+
+        updateLatencyDialogUi()
+        latencyDialog.show()
     }
     
     override fun onInit(status: Int) {
@@ -1824,17 +1933,11 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                     p0: AdapterView<*>?, p1: View?, p2: Int, p3: Long
                 ) {
                     decoderMode = when (p2) {
-                        0 -> MyScriptService.DecoderMode.LLM_RAW_TTS
-                        1 -> MyScriptService.DecoderMode.LLM
-                        2 -> MyScriptService.DecoderMode.NGRAM
+                        0 -> MyScriptService.DecoderMode.NGRAM
                         else -> MyScriptService.DecoderMode.NONE
                     }
                     myScriptService?.decoderMode = decoderMode
                     myScriptService?.llmTimeoutMs = llmTimeoutMs
-                    
-                    if (decoderMode == MyScriptService.DecoderMode.LLM || decoderMode == MyScriptService.DecoderMode.LLM_RAW_TTS) {
-                        myScriptService?.preloadLlm()
-                    }
                     updateControlsUi()
                 }
 
@@ -1918,14 +2021,15 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         bottomSheetBinding!!.btnHapticEngineSettings.setOnClickListener {
             showHapticSettingsDialog()
         }
+        bottomSheetBinding!!.btnLatencyRefinements.setOnClickListener {
+            showLatencySettingsDialog()
+        }
     }
 
     private fun getDecoderModeIndex(): Int {
         return when (decoderMode) {
-            MyScriptService.DecoderMode.LLM_RAW_TTS -> 0
-            MyScriptService.DecoderMode.LLM -> 1
-            MyScriptService.DecoderMode.NGRAM -> 2
-            MyScriptService.DecoderMode.NONE -> 3
+            MyScriptService.DecoderMode.NGRAM -> 0
+            else -> 1
         }
     }
 

@@ -1,5 +1,6 @@
 package com.alexvas.rtsp.widget
 
+import com.google.mediapipe.examples.handlandmarker.LatencyConfig
 import android.annotation.SuppressLint
 import android.media.MediaFormat
 import android.net.Uri
@@ -53,7 +54,7 @@ class RtspProcessor(
     private var requestAudio = true
     private var requestApplication = false
     private var rtspThread: RtspThread? = null
-    private var videoFrameQueue = VideoFrameQueue(60)
+    private var videoFrameQueue = VideoFrameQueue(LatencyConfig.customFrameBufferCapacity)
     private var audioFrameQueue = AudioFrameQueue(10)
     private var videoDecodeThread: VideoDecodeThread? = null
     private var audioDecodeThread: AudioDecodeThread? = null
@@ -107,7 +108,7 @@ class RtspProcessor(
      * If SPS frame param num_ref_frames is equal to 1 or more, set it to 0. That should decrease
      * decoder latency by 2x times on some hardware decoders.
      */
-    var experimentalUpdateSpsFrameWithLowLatencyParams = false
+    var experimentalUpdateSpsFrameWithLowLatencyParams = LatencyConfig.customLowLatencySpsRewrite
 
     /**
      * Enables the playback smoothing logic inside the video decoder.

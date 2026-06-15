@@ -54,8 +54,6 @@
 
     <string name="label_recognition_mode">Recognition Mode</string>
     <string-array name="recognition_mode_titles">
-        <item>LLM (TTS Raw)</item>
-        <item>LLM</item>
         <item>N-Gram</item>
         <item>None</item>
     </string-array>

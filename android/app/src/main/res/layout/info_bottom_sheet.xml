@@ -47,6 +47,33 @@
                 android:background="@drawable/drag_pill" />
         </RelativeLayout>
 
+        <!-- Latency Refinements Submenu Button -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:text="Latency Refinements"
+                android:textColor="@color/bottom_sheet_text_color"
+                android:textSize="@dimen/bottom_sheet_text_size" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/btn_latency_refinements"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_alignParentRight="true"
+                android:layout_centerVertical="true"
+                android:text="Configure"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:background="@drawable/glass_button_bg"
+                app:backgroundTint="@null" />
+        </RelativeLayout>
+
         <!-- Master Debug Overlays switch -->
         <RelativeLayout
             android:layout_width="match_parent"
