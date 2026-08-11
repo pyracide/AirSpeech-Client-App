@@ -20,8 +20,20 @@ An Android application written in Kotlin to process continuous, egocentric (firs
 * **Pinch-to-Draw:** Triggers active drawing via a thumb-to-index finger pinch, made reliable with hysteresis thresholds and a 100ms debounce buffer to mitigate landmark tracking jitter.
 * **Open-Palm Send:** Drawing is committed with an Open-Palm Send, by computing 2D vector cosine similarities across 4 fingers.
 * **Closed-Fist Clear:** Triggers a Clear by activating a canvas wipe sequence if the absolute fingertip-to-wrist distance drops below $1.15 \times$ knuckle-to-wrist distance simultaneously across all fingers. Includes a 5-second idle auto-clear failsafe.
-* **Telemetry & Boundary Haptics:** Pushes real-time UDP telemetry bursts (`HAND_DETECTED`, `HAND_LOST`) and proportional boundary proximity warning packets (`PROXIM:1–3`) to drive haptic feedback on the custom wearable; this keeps the user informed.
+* **Status & Boundary Haptics:** Pushes real-time UDP bursts (`HAND_DETECTED`, `HAND_LOST`) and proportional boundary warnings (`PROXIM:1–3`) to drive haptic feedback on the custom wearable; this keeps the user informed.
 * **Lexicon Constraint:** Overrides MyScript default dictionaries with a targeted 7,000-word lexicon (98% of spoken English) derived from the SUBTLEX-UK corpus.
+
+---
+
+## Key Files
+
+* **`CameraFragment.kt`**: Main controller: hand tracking callbacks, gesture math, ink ingestion, TTS output, UI state.
+* **`HandLandmarkerHelper.kt`**: MediaPipe Hand Landmarker wrapper that processes camera frames and outputs 21 3D hand landmarks.
+* **`OverlayView.kt`**: Renderer for hand skeleton landmarks, gesture visualizers, ink trails, and boundary alerts.
+* **`MyScriptService.kt`**: Handwriting recognition engine that converts strokes into text via MyScript SDK OffscreenEditor.
+* **`SmartGlassesStreamService.kt`**: Asynchronous WebSocket client ingesting low-latency MJPEG video streams from wearable hardware. Very flexible, works with any MJPEG websocket stream
+* **`RtspProcessor.kt`**: RTSP streaming client and hardware H.264 video decoder pipeline for high-definition video ingestion. High performance but expects a specific format. 
+* **`UdpHapticController.kt`**: Controller sending real-time UDP status and proximity packets to drive wearable haptics.
 
 ---
 
@@ -40,7 +52,8 @@ An Android application written in Kotlin to process continuous, egocentric (firs
 ## Project Dependencies
 
 * `com.google.mediapipe:tasks-vision`
-* `myscript-iink-android-sdk` *(requires a license from MyScript)*
+* `myscript-iink-android-sdk` *(requires a free license from MyScript)*
 * `io.ktor:ktor-client-core`
 * `io.ktor:ktor-client-websockets`
+
 

@@ -560,20 +560,8 @@ class RtspProcessor(
             // https://community.intel.com/t5/Media-Intel-oneAPI-Video/h-264-decoder-gives-two-frames-latency-while-decoding-a-stream/td-p/1099694
             // https://github.com/Consti10/LiveVideo10ms/blob/master/VideoCore/src/main/cpp/NALU/H26X.hpp
             fun modifyVui() {
-//                spsSet.vuiParams = VUIParameters()
                 spsSet.vuiParams.apply {
-//                    videoSignalTypePresentFlag = true
-//                    videoFormat = 5
-//                    colourDescriptionPresentFlag = true
-//                    matrixCoefficients = 5
-//                    timingInfoPresentFlag = true
-//                    numUnitsInTick = 1
-//                    timeScale = 120
-//                    fixedFrameRateFlag = true
                     bitstreamRestriction = VUIParameters.BitstreamRestriction().apply {
-//                        motionVectorsOverPicBoundariesFlag = true
-//                        log2MaxMvLengthHorizontal = 16
-//                        log2MaxMvLengthVertical = 16
                         maxDecFrameBuffering = 1
                         numReorderFrames = 0
                     }
