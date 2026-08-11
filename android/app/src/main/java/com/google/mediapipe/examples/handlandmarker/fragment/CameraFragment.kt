@@ -167,6 +167,10 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     private var rtspFrameBufferCapacity = 60
     private var rtspLowLatencySpsRewrite = false
     private var rtspPollingDelayMs = 33L
+    private var wearableBitrate = 1000000
+    private var doublePinchRunnable: java.lang.Runnable? = null
+    private val doublePinchHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var isDoublePinchPending = false
     
     private val camFpsQueue = java.util.ArrayDeque<Long>()
     private val mpFpsQueue = java.util.ArrayDeque<Long>()
@@ -215,6 +219,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
     override fun onPause() {
         super.onPause()
         cancelRtspReconnect()
+        cancelPendingDoublePinch()
         if(this::handLandmarkerHelper.isInitialized) {
             viewModel.setMaxHands(handLandmarkerHelper.maxNumHands)
             viewModel.setMinHandDetectionConfidence(handLandmarkerHelper.minHandDetectionConfidence)
@@ -463,6 +468,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         
         fragmentCameraBinding.overlay.strokeListener = object : OverlayView.OnStrokeListener {
             override fun onStroke(points: List<MyScriptService.PointData>) {
+                if (isDoublePinchPending) {
+                    cancelPendingDoublePinch()
+                }
                 if (strokeStartTime == 0L) {
                     val now = System.currentTimeMillis()
                     strokeStartTime = now
@@ -474,6 +482,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 myScriptService?.addStroke(points)
             }
             override fun onClear() {
+                if (isDoublePinchPending) {
+                    cancelPendingDoublePinch()
+                }
                 strokeStartTime = 0L
                 myScriptService?.strokeStartTime = 0L
                 activity?.runOnUiThread {
@@ -486,33 +497,43 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 myScriptService?.clear()
             }
             override fun onSend() {
+                if (isDoublePinchPending) {
+                    cancelPendingDoublePinch()
+                }
                 myScriptService?.commitAndClear()
             }
             override fun onDoublePinch() {
                 if (!fragmentCameraBinding.overlay.isDoublePinchUndoEnabled) return
-                strokeStartTime = 0L
-                myScriptService?.strokeStartTime = 0L
-                activity?.runOnUiThread {
-                    fragmentCameraBinding.textTimerScore.text = "Timer: -- ms"
-                    fragmentCameraBinding.inkPreview.setStrokes(emptyList())
-                    if (isJiixDebugEnabled) {
-                        fragmentCameraBinding.jiixDebugView.showStrokes(emptyList())
+                cancelPendingDoublePinch()
+                isDoublePinchPending = true
+                doublePinchRunnable = Runnable {
+                    isDoublePinchPending = false
+                    doublePinchRunnable = null
+                    strokeStartTime = 0L
+                    myScriptService?.strokeStartTime = 0L
+                    activity?.runOnUiThread {
+                        fragmentCameraBinding.textTimerScore.text = "Timer: -- ms"
+                        fragmentCameraBinding.inkPreview.setStrokes(emptyList())
+                        if (isJiixDebugEnabled) {
+                            fragmentCameraBinding.jiixDebugView.showStrokes(emptyList())
+                        }
                     }
-                }
-                // Undo last word from LLM context
-                val didUndo = myScriptService?.undoLastWord() == true
-                if (didUndo) {
-                    tts?.speak("I mean", TextToSpeech.QUEUE_FLUSH, null, "DoublePinchUndo")
-                }
+                    // Undo last word from LLM context
+                    val didUndo = myScriptService?.undoLastWord() == true
+                    if (didUndo) {
+                        tts?.speak("I mean", TextToSpeech.QUEUE_FLUSH, null, "DoublePinchUndo")
+                    }
 
-                // Clear MyScript engine buffer
-                myScriptService?.clear()
+                    // Clear MyScript engine buffer
+                    myScriptService?.clear()
 
-                // Silent Clear - visually remove dots 0.1s later
-                fragmentCameraBinding.overlay.postDelayed({
-                    fragmentCameraBinding.overlay.clearDrawing()
-                    fragmentCameraBinding.overlay.invalidate()
-                }, 100)
+                    // Silent Clear - visually remove dots 0.1s later
+                    fragmentCameraBinding.overlay.postDelayed({
+                        fragmentCameraBinding.overlay.clearDrawing()
+                        fragmentCameraBinding.overlay.invalidate()
+                    }, 100)
+                }
+                doublePinchHandler.postDelayed(doublePinchRunnable!!, 400)
             }
             override fun onTriplePinch() {
                 strokeStartTime = 0L
@@ -555,6 +576,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 }
             }
             override fun onAbort() {
+                if (isDoublePinchPending) {
+                    cancelPendingDoublePinch()
+                }
                 strokeStartTime = 0L
                 myScriptService?.strokeStartTime = 0L
                 activity?.runOnUiThread {
@@ -568,6 +592,9 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
                 myScriptService?.clear()
             }
             override fun onDrawingStateChanged(isWriting: Boolean) {
+                if (isWriting && isDoublePinchPending) {
+                    cancelPendingDoublePinch()
+                }
                 udpHapticController.onDrawingStateChanged(isWriting)
             }
             override fun onHandMoved(avgX: Float, avgY: Float) {
@@ -1169,6 +1196,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             putInt("rtsp_frame_buffer_capacity", rtspFrameBufferCapacity)
             putBoolean("rtsp_low_latency_sps_rewrite", rtspLowLatencySpsRewrite)
             putLong("rtsp_polling_delay", rtspPollingDelayMs)
+            putInt("wearable_bitrate", wearableBitrate)
             apply()
         }
     }
@@ -1206,6 +1234,7 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         rtspFrameBufferCapacity = prefs.getInt("rtsp_frame_buffer_capacity", 60)
         rtspLowLatencySpsRewrite = prefs.getBoolean("rtsp_low_latency_sps_rewrite", false)
         rtspPollingDelayMs = prefs.getLong("rtsp_polling_delay", 33L)
+        wearableBitrate = prefs.getInt("wearable_bitrate", 1000000)
         LatencyConfig.customFrameBufferCapacity = rtspFrameBufferCapacity
         LatencyConfig.customLowLatencySpsRewrite = rtspLowLatencySpsRewrite
     }
@@ -1386,15 +1415,62 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         }
     }
 
+    private fun cancelPendingDoublePinch() {
+        doublePinchRunnable?.let {
+            doublePinchHandler.removeCallbacks(it)
+        }
+        doublePinchRunnable = null
+        isDoublePinchPending = false
+    }
+
     private fun filterBoToTo(input: String): String {
-        return input.split(Regex("(?<=\\b)|(?=\\b)")).joinToString("") { word ->
-            when (word) {
-                "bo" -> "to"
-                "Bo" -> "To"
-                "BO" -> "TO"
-                else -> word
+        val parts = input.split(Regex("(?<=\\b)|(?=\\b)"))
+        val result = ArrayList<String>()
+        val rawPrev = myScriptService?.llmContextWords?.lastOrNull()?.trim()?.lowercase()
+        var previousWord: String? = when (rawPrev) {
+            "thus", "thy" -> "this"
+            "bo" -> "to"
+            else -> rawPrev
+        }
+
+        for (part in parts) {
+            val isWord = part.any { it.isLetterOrDigit() }
+            if (isWord) {
+                var replacedWord = part
+                val lower = part.lowercase()
+
+                if (lower == "bo") {
+                    replacedWord = when (part) {
+                        "bo" -> "to"
+                        "Bo" -> "To"
+                        "BO" -> "TO"
+                        else -> "to"
+                    }
+                } else if (lower == "thus" || lower == "thy") {
+                    replacedWord = when (part) {
+                        "thus", "thy" -> "this"
+                        "Thus", "Thy" -> "This"
+                        "THUS", "THY" -> "THIS"
+                        else -> "this"
+                    }
+                } else if ((lower == "us" || lower == "i") && previousWord?.lowercase() == "this") {
+                    replacedWord = when (part) {
+                        "us" -> "is"
+                        "Us" -> "Is"
+                        "US" -> "IS"
+                        "i" -> "is"
+                        "I" -> "Is"
+                        else -> "is"
+                    }
+                }
+
+                result.add(replacedWord)
+                previousWord = replacedWord
+            } else {
+                result.add(part)
             }
         }
+        return result.joinToString("")
     }
     
     private fun showSettingsDialog() {
@@ -1547,9 +1623,25 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
         latencyDialog.setContentView(latencyBinding.root)
 
         fun updateLatencyDialogUi() {
+            val bitrateKbps = wearableBitrate / 1000
+            latencyBinding.textWearableBitrateValue.text = "${bitrateKbps} Kbps"
             latencyBinding.textRtspBufferValue.text = "${rtspFrameBufferCapacity} frames"
             latencyBinding.switchSpsRewrite.isChecked = rtspLowLatencySpsRewrite
             latencyBinding.textPollingDelayValue.text = "${rtspPollingDelayMs} ms"
+        }
+
+        latencyBinding.btnWearableBitrateMinus.setOnClickListener {
+            wearableBitrate = (wearableBitrate - 50000).coerceAtLeast(100000)
+            updateLatencyDialogUi()
+            udpHapticController.sendBitrate(wearableBitrate)
+            saveConnectionSettings()
+        }
+
+        latencyBinding.btnWearableBitratePlus.setOnClickListener {
+            wearableBitrate = (wearableBitrate + 50000).coerceAtMost(2500000)
+            updateLatencyDialogUi()
+            udpHapticController.sendBitrate(wearableBitrate)
+            saveConnectionSettings()
         }
 
         latencyBinding.btnRtspBufferMinus.setOnClickListener {
@@ -1588,8 +1680,10 @@ class CameraFragment : Fragment(), HandLandmarkerHelper.LandmarkerListener, Text
             rtspFrameBufferCapacity = 60
             rtspLowLatencySpsRewrite = false
             rtspPollingDelayMs = 33L
+            wearableBitrate = 1000000
             updateLatencyDialogUi()
             applyLatencyRefinementsRealTime()
+            udpHapticController.sendBitrate(wearableBitrate)
             saveConnectionSettings()
         }
 

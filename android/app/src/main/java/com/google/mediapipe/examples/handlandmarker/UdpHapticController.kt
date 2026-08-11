@@ -280,6 +280,12 @@ class UdpHapticController(private val onStatus: ((String) -> Unit)? = null) {
     fun onZoneChanged(zone: Int) {
         currentZone = (zone - 1).coerceIn(0, 3)
     }
+
+    fun sendBitrate(bitrateBps: Int) {
+        scope.launch(Dispatchers.IO) {
+            sendPacket("BITRATE:$bitrateBps")
+        }
+    }
     
     private fun sendPacket(message: String) {
         if (!isEnabled) {

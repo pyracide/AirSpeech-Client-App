@@ -100,7 +100,7 @@ class MyScriptService(private val context: Context, private val listener: Recogn
     private val scope = CoroutineScope(Dispatchers.Main + Job())
     private val languageModel by lazy { TrigramLanguageModel(context) }
     private val llmEngine by lazy { LlmEngine(context) }
-    private val llmContextWords = mutableListOf<String>()
+    internal val llmContextWords = mutableListOf<String>()
     private val undoBlocklist = mutableSetOf<String>()
     private var llmLoaded = false
     private var canUndo = false

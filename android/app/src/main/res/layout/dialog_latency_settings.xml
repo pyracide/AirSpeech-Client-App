@@ -45,6 +45,57 @@
             android:gravity="center"
             android:layout_marginBottom="16dp" />
 
+        <!-- Wearable Bitrate -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/bottom_sheet_default_row_margin"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:text="Wearable Bitrate"
+                android:textColor="@color/bottom_sheet_text_color"
+                android:textSize="@dimen/bottom_sheet_text_size" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentRight="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btn_wearable_bitrate_minus"
+                    android:layout_width="@dimen/bottom_sheet_control_btn_size"
+                    android:layout_height="@dimen/bottom_sheet_control_btn_size"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
+                    android:src="@drawable/ic_minus" />
+
+                <TextView
+                    android:id="@+id/text_wearable_bitrate_value"
+                    android:layout_width="75dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:textColor="@color/bottom_sheet_text_color"
+                    android:textSize="@dimen/bottom_sheet_text_size"
+                    android:textStyle="bold" />
+
+                <androidx.appcompat.widget.AppCompatImageButton
+                    android:id="@+id/btn_wearable_bitrate_plus"
+                    android:layout_width="@dimen/bottom_sheet_control_btn_size"
+                    android:layout_height="@dimen/bottom_sheet_control_btn_size"
+                    android:background="@drawable/rounded_button_bg"
+                    app:backgroundTint="@null"
+                    android:tint="#FFFFFF"
+                    android:src="@drawable/ic_plus" />
+            </LinearLayout>
+        </RelativeLayout>
+
         <!-- RTSP Frame Buffer -->
         <RelativeLayout
             android:layout_width="match_parent"
